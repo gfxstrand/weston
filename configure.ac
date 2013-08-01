@@ -316,6 +316,13 @@ AC_ARG_ENABLE(tablet-shell,
 AM_CONDITIONAL(ENABLE_TABLET_SHELL,
 	       test "x$enable_tablet_shell" = "xyes")
 
+AC_ARG_ENABLE(system-compositor,
+              AS_HELP_STRING([--disable-system-compositor],
+                             [do not build system-compositor server plugin]),,
+	      enable_system_compositor=yes)
+AM_CONDITIONAL(ENABLE_SYSTEM_COMPOSITOR,
+	       test "x$enable_system_compositor" = "xyes")
+
 # CMS modules
 AC_ARG_ENABLE(colord,
               AS_HELP_STRING([--disable-colord],

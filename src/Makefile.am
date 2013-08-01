@@ -100,6 +100,7 @@ moduledir = $(libdir)/weston
 module_LTLIBRARIES =				\
 	$(desktop_shell)			\
 	$(tablet_shell)				\
+	$(system_compositor)			\
 	$(cms_static)				\
 	$(cms_colord)				\
 	$(x11_backend)				\
@@ -259,6 +260,17 @@ tablet_shell_la_SOURCES =			\
 	tablet-shell.c				\
 	tablet-shell-protocol.c			\
 	tablet-shell-server-protocol.h
+endif
+
+if ENABLE_SYSTEM_COMPOSITOR
+system_compositor = system-compositor.la
+system_compositor_la_LDFLAGS = -module -avoid-version
+system_compositor_la_LIBADD = $(COMPOSITOR_LIBS)
+system_compositor_la_CFLAGS = $(GCC_CFLAGS) $(COMPOSITOR_CFLAGS)
+system_compositor_la_SOURCES =			\
+	system-compositor.c			\
+	system-compositor-protocol.c		\
+	system-compositor-server-protocol.h
 endif
 
 if HAVE_LCMS
