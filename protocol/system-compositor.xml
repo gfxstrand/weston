@@ -1,0 +1,33 @@
+<protocol name="system_compositor">
+  <interface name="wl_system_compositor" version="1">
+    <description summary="Displays a single surface per output">
+      Displays a single surface per output.
+      
+      This interface can only be bound to by one client at a time.
+    </description>
+
+    <enum name="fullscreen_method">
+      <description summary="different method to set the surface fullscreen">
+	Hints to indicate to the compositor how to deal with a conflict
+	between the dimensions of the surface and the dimensions of the
+	output. The compositor is free to ignore this parameter.
+      </description>
+      <entry name="default" value="0" summary="no preference, apply default policy"/>
+      <entry name="scale" value="1" summary="scale, preserve the surface's aspect ratio and center on output"/>
+      <entry name="driver" value="2" summary="switch output mode to the smallest mode that can fit the surface, add black borders to compensate size mismatch"/>
+      <entry name="fill" value="3" summary="no upscaling, center on output and add black borders to compensate size mismatch"/>
+    </enum>
+
+    <request name="present_surface">
+      <description summary="present surface for display">
+	This requests the system compositor to display surface on output.
+	Each client of the system compositor can have at most one surface
+  per output at any one time. Subsequent requests with the same output
+  replace the surface bound to that output.
+      </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="method" type="uint"/>
+      <arg name="framerate" type="uint"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </request>
+</protocol>
