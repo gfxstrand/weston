@@ -38,6 +38,8 @@ weston_SOURCES =				\
 	workspaces-server-protocol.h		\
 	subsurface-protocol.c			\
 	subsurface-server-protocol.h		\
+	system-compositor-protocol.c		\
+	system-compositor-server-protocol.h	\
 	bindings.c				\
 	animation.c				\
 	gl-renderer.h				\
@@ -308,6 +310,8 @@ BUILT_SOURCES =					\
 	workspaces-protocol.c			\
 	subsurface-server-protocol.h		\
 	subsurface-protocol.c			\
+	system-compositor-server-protocol.h	\
+	system-compositor-protocol.c		\
 	git-version.h
 
 CLEANFILES = $(BUILT_SOURCES)
