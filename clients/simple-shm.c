@@ -32,12 +32,14 @@
 
 #include <wayland-client.h>
 #include "../shared/os-compatibility.h"
+#include "system-compositor-client-protocol.h"
 
 struct display {
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
 	struct wl_shell *shell;
+	struct wl_system_compositor *systemc;
 	struct wl_shm *shm;
 	uint32_t formats;
 };
@@ -146,16 +148,25 @@ create_window(struct display *display, int width, int height)
 	window->width = width;
 	window->height = height;
 	window->surface = wl_compositor_create_surface(display->compositor);
-	window->shell_surface = wl_shell_get_shell_surface(display->shell,
-							   window->surface);
 
-	if (window->shell_surface)
+	if (display->shell) {
+		window->shell_surface =
+			wl_shell_get_shell_surface(display->shell,
+						   window->surface);
+		assert(window->shell_surface);
 		wl_shell_surface_add_listener(window->shell_surface,
 					      &shell_surface_listener, window);
 
-	wl_shell_surface_set_title(window->shell_surface, "simple-shm");
-
-	wl_shell_surface_set_toplevel(window->shell_surface);
+		wl_shell_surface_set_title(window->shell_surface, "simple-shm");
+		wl_shell_surface_set_toplevel(window->shell_surface);
+	} else if (display->systemc) {
+		wl_system_compositor_present_surface(display->systemc,
+						     window->surface,
+						     WL_SYSTEM_COMPOSITOR_FULLSCREEN_METHOD_DEFAULT,
+						     0, NULL);
+	} else {
+		assert(0);
+	}
 
 	return window;
 }
@@ -311,6 +322,9 @@ registry_handle_global(void *data, struct wl_registry *registry,
 	} else if (strcmp(interface, "wl_shell") == 0) {
 		d->shell = wl_registry_bind(registry,
 					    id, &wl_shell_interface, 1);
+	} else if (strcmp(interface, "wl_system_compositor") == 0) {
+		d->systemc = wl_registry_bind(registry,
+					    id, &wl_system_compositor_interface, 1);
 	} else if (strcmp(interface, "wl_shm") == 0) {
 		d->shm = wl_registry_bind(registry,
 					  id, &wl_shm_interface, 1);
@@ -366,8 +380,8 @@ destroy_display(struct display *display)
 	if (display->shm)
 		wl_shm_destroy(display->shm);
 
-	if (display->shell)
-		wl_shell_destroy(display->shell);
+	if (display->systemc)
+		wl_system_compositor_destroy(display->systemc);
 
 	if (display->compositor)
 		wl_compositor_destroy(display->compositor);

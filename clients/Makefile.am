@@ -38,6 +38,8 @@ simple_clients_programs =			\
 	weston-simple-touch
 
 weston_simple_shm_SOURCES = simple-shm.c 	\
+	system-compositor-client-protocol.h	\
+	system-compositor-protocol.c		\
 	../shared/os-compatibility.c		\
 	../shared/os-compatibility.h
 weston_simple_shm_CPPFLAGS = $(SIMPLE_CLIENT_CFLAGS)
@@ -219,6 +221,8 @@ BUILT_SOURCES =					\
 	input-method-client-protocol.h		\
 	desktop-shell-client-protocol.h		\
 	desktop-shell-protocol.c		\
+	system-compositor-client-protocol.h	\
+	system-compositor-protocol.c		\
 	tablet-shell-client-protocol.h		\
 	tablet-shell-protocol.c			\
 	subsurface-client-protocol.h		\
