@@ -167,6 +167,8 @@ configure_presented_surface(struct weston_surface *surface, int32_t sx,
 		return;
 	scsurf = surface->configure_private;
 
+	weston_surface_configure(surface, sx, sy, width, height);
+
 	if (scsurf->method != WL_SYSTEM_COMPOSITOR_FULLSCREEN_METHOD_DRIVER)
 		restore_output_mode(scsurf->output);
 
@@ -268,8 +270,6 @@ system_compositor_present_surface(struct wl_client *client,
 	scsurf = find_surface_for_output(syscomp, output);
 
 	if (surface_res) {
-		surface = wl_resource_get_user_data(surface_res);
-
 		if (surface->configure_private) {
 			wl_resource_post_error(surface_res,
 					       WL_DISPLAY_ERROR_INVALID_OBJECT,
@@ -279,6 +279,7 @@ system_compositor_present_surface(struct wl_client *client,
 
 		if (scsurf == NULL) {
 			scsurf = malloc(sizeof *scsurf);
+			memset(scsurf, 0, sizeof *scsurf);
 			scsurf->black_surface =
 				create_black_surface(syscomp->compositor,
 						     scsurf,
@@ -290,8 +291,9 @@ system_compositor_present_surface(struct wl_client *client,
 				return;
 			}
 			/* Put the black surface on the bottom */
-			wl_list_insert(&syscomp->layer.surface_list,
+			wl_list_insert(syscomp->layer.surface_list.prev,
 				       &scsurf->black_surface->layer_link);
+
 			wl_list_insert(&syscomp->surfaces_list, &scsurf->link);
 			scsurf->output = output;
 		}
@@ -303,12 +305,13 @@ system_compositor_present_surface(struct wl_client *client,
 		surface->configure_private = scsurf;
 
 		/* Put this surface on the top */
-		wl_list_insert(syscomp->layer.surface_list.prev,
+		wl_list_insert(&syscomp->layer.surface_list,
 			       &surface->layer_link);
 
 		scsurf->surface = surface;
 		scsurf->method = method;
 		scsurf->framerate = framerate;
+
 		// TODO: Call configure?
 	} else if (scsurf) {
 		weston_surface_destroy(scsurf->black_surface);
@@ -316,6 +319,8 @@ system_compositor_present_surface(struct wl_client *client,
 		wl_list_remove(&scsurf->link);
 		free(scsurf);
 	}
+
+	weston_compositor_schedule_repaint(syscomp->compositor);
 }
 
 struct wl_system_compositor_interface system_compositor_implementation = {
@@ -329,8 +334,9 @@ bind_system_compositor(struct wl_client *client, void *data, uint32_t version,
 	struct system_compositor *sysc = data;
 	struct wl_resource *resource;
 
-	if (sysc->client != client)
+	if (sysc->client != NULL && sysc->client != client)
 		return;
+	sysc->client = client;
 
 	resource = wl_resource_create(client, &wl_system_compositor_interface,
 				      1, id);
@@ -351,6 +357,8 @@ module_init(struct weston_compositor *compositor,
 
 	memset(sysc, 0, sizeof *sysc);
 	sysc->compositor = compositor;
+
+	wl_list_init(&sysc->surfaces_list);
 
 	wl_global_create(compositor->wl_display,
 			 &wl_system_compositor_interface, 1, sysc,
