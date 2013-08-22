@@ -69,11 +69,10 @@ struct wayland_output {
 
 		struct weston_mode *current_mode;
 		struct weston_mode *preferred_mode;
-
-		int draw_initial_frame;
 	} parent;
 
 	struct wl_list link;
+	int draw_initial_frame;
 };
 
 struct wayland_input {
@@ -180,8 +179,8 @@ wayland_output_start_repaint_loop(struct weston_output *output_base)
 	 * loop. If the surface doesn't end up in the render loop, the frame
 	 * callback won't be invoked. The buffer is transparent and of the
 	 * same size as the future real output buffer. */
-	if (output->parent.draw_initial_frame) {
-		output->parent.draw_initial_frame = 0;
+	if (output->draw_initial_frame) {
+		output->draw_initial_frame = 0;
 
 		draw_initial_frame(output);
 	}
@@ -346,9 +345,10 @@ wayland_output_initialize(struct wayland_compositor *c,
 		goto err_output_destroy;
 	wl_system_compositor_present_surface(c->parent.system_compositor,
 					     output->parent.surface,
-					     WL_SYSTEM_COMPOSITOR_FULLSCREEN_METHOD_DRIVER,
+					     WL_SYSTEM_COMPOSITOR_FULLSCREEN_METHOD_DEFAULT,
 					     output->base.current->refresh,
 					     output->parent.output);
+	output->draw_initial_frame = 1;
 
 	output->base.origin = output->base.current;
 	output->base.start_repaint_loop = wayland_output_start_repaint_loop;
