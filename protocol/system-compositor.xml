@@ -28,6 +28,6 @@
       <arg name="surface" type="object" interface="wl_surface"/>
       <arg name="method" type="uint"/>
       <arg name="framerate" type="uint"/>
-      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="output" type="object" interface="wl_output" allow-null="true"/>
     </request>
 </protocol>

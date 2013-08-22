@@ -160,6 +160,17 @@ if test x$enable_wayland_compositor = xyes -a x$enable_egl = xyes; then
 fi
 
 
+AC_ARG_ENABLE(wlsc-compositor, [  --enable-wlsc-compositor],,
+	      enable_wlsc_compositor=yes)
+AM_CONDITIONAL(ENABLE_WLSC_COMPOSITOR,
+	       test x$enable_wlsc_compositor = xyes -a x$enable_egl = xyes)
+if test x$enable_wlsc_compositor = xyes -a x$enable_egl = xyes; then
+  AC_DEFINE([BUILD_WLSC_COMPOSITOR], [1],
+	    [Build the Wayland (system compositor) compositor])
+  PKG_CHECK_MODULES(WLSC_COMPOSITOR, [wayland-client wayland-egl])
+fi
+
+
 AC_ARG_ENABLE(headless-compositor, [  --enable-headless-compositor],,
 	      enable_headless_compositor=yes)
 AM_CONDITIONAL(ENABLE_HEADLESS_COMPOSITOR,

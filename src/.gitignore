@@ -22,5 +22,6 @@ input-method-server-protocol.h
 subsurface-server-protocol.h
 subsurface-protocol.c
 system-compositor-server-protocol.h
+system-compositor-client-protocol.h
 system-compositor-protocol.c
 

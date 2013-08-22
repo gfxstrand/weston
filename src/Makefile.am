@@ -106,6 +106,7 @@ module_LTLIBRARIES =				\
 	$(x11_backend)				\
 	$(drm_backend)				\
 	$(wayland_backend)			\
+	$(wlsc_backend)				\
 	$(headless_backend)			\
 	$(fbdev_backend)			\
 	$(rdp_backend)
@@ -167,6 +168,23 @@ wayland_backend_la_CFLAGS =			\
 	$(WAYLAND_COMPOSITOR_CFLAGS)		\
 	$(GCC_CFLAGS)
 wayland_backend_la_SOURCES = compositor-wayland.c
+endif
+
+if ENABLE_WLSC_COMPOSITOR
+wlsc_backend = wlsc-backend.la
+wlsc_backend_la_LDFLAGS = -module -avoid-version
+wlsc_backend_la_LIBADD = $(COMPOSITOR_LIBS) $(WLSC_COMPOSITOR_LIBS) \
+	../shared/libshared-cairo.la
+wlsc_backend_la_CFLAGS =			\
+	$(COMPOSITOR_CFLAGS)			\
+	$(PIXMAN_CFLAGS)			\
+	$(CAIRO_CFLAGS)				\
+	$(WAYLAND_COMPOSITOR_CFLAGS)		\
+	$(GCC_CFLAGS)
+wlsc_backend_la_SOURCES =			\
+	compositor-wlsc.c			\
+	system-compositor-protocol.c		\
+	system-compositor-client-protocol.h
 endif
 
 if ENABLE_RPI_COMPOSITOR
@@ -323,6 +341,7 @@ BUILT_SOURCES =					\
 	subsurface-server-protocol.h		\
 	subsurface-protocol.c			\
 	system-compositor-server-protocol.h	\
+	system-compositor-client-protocol.h	\
 	system-compositor-protocol.c		\
 	git-version.h
 
