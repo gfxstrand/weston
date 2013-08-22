@@ -29,6 +29,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <assert.h>
 #include <sys/mman.h>
 
 #include <wayland-client.h>
@@ -71,6 +72,8 @@ struct wayland_output {
 
 		int draw_initial_frame;
 	} parent;
+
+	struct wl_list link;
 };
 
 struct wayland_input {
@@ -213,6 +216,8 @@ wayland_output_destroy(struct weston_output *output_base)
 
 	gl_renderer_output_destroy(output_base);
 
+	wl_output_destroy(output->parent.output);
+
 	wl_egl_window_destroy(output->parent.egl_window);
 	free(output);
 
@@ -225,16 +230,16 @@ static const struct wl_shell_surface_listener shell_surface_listener;
 
 /* parent output interface */
 static void
-output_handle_geometry(void *data,
-		       struct wl_output *wl_output,
-		       int x,
-		       int y,
-		       int physical_width,
-		       int physical_height,
-		       int subpixel,
-		       const char *make,
-		       const char *model,
-		       int transform)
+wayland_output_handle_geometry(void *data,
+			       struct wl_output *wl_output,
+			       int x,
+			       int y,
+			       int physical_width,
+			       int physical_height,
+			       int subpixel,
+			       const char *make,
+			       const char *model,
+			       int transform)
 {
 	struct wayland_output *output = data;
 
@@ -275,12 +280,12 @@ output_get_mode(struct wayland_output *output,
 }
 
 static void
-output_handle_mode(void *data,
-		   struct wl_output *wl_output,
-		   uint32_t flags,
-		   int width,
-		   int height,
-		   int refresh)
+wayland_output_handle_mode(void *data,
+			   struct wl_output *wl_output,
+			   uint32_t flags,
+			   int width,
+			   int height,
+			   int refresh)
 {
 	struct wayland_output *output = data;
 
@@ -297,33 +302,20 @@ output_handle_mode(void *data,
 }
 
 static const struct wl_output_listener output_listener = {
-	output_handle_geometry,
-	output_handle_mode
+	wayland_output_handle_geometry,
+	wayland_output_handle_mode
 };
 
 static int
-wayland_compositor_create_output(struct wayland_compositor *c, uint32_t id)
+wayland_output_initialize(struct wayland_compositor *c,
+			  struct wayland_output *output)
 {
-	struct wayland_output *output;
-	struct weston_mode *mode, *tmp;
-
-	output = malloc(sizeof *output);
-	if (output == NULL)
-		return -1;
-	memset(output, 0, sizeof *output);
-
-	wl_list_init(&output->base.mode_list);
-
-	output->parent.output = wl_registry_bind(c->parent.registry, id,
-						 &wl_output_interface, 1);
-	if (!output->parent.output)
-		goto err_free;
-	wl_output_add_listener(output->parent.output, &output_listener, output);
-	/* Get modes and geometry */
-	wl_display_roundtrip(c->parent.display);
+	/* Only initialize once */
+	if (output->parent.surface)
+		return 0;
 
 	if (!output->parent.current_mode)
-		goto err_proxy_destroy;
+		return -1;
 
 	output->base.current = output->parent.current_mode;
 
@@ -349,7 +341,6 @@ wayland_compositor_create_output(struct wayland_compositor *c, uint32_t id)
 	if (gl_renderer_output_create(&output->base,
 			output->parent.egl_window) < 0)
 		goto err_output_destroy;
-	
 
 	if (!c->parent.system_compositor)
 		goto err_output_destroy;
@@ -375,6 +366,37 @@ wayland_compositor_create_output(struct wayland_compositor *c, uint32_t id)
 
 err_output_destroy:
 	weston_output_destroy(&output->base);
+	return -1;
+}
+
+static void
+wayland_output_create(struct wayland_compositor *c, uint32_t id)
+{
+	struct wayland_output *output;
+	struct weston_mode *mode, *tmp;
+
+	output = malloc(sizeof *output);
+	if (output == NULL)
+		return;
+	memset(output, 0, sizeof *output);
+
+	wl_list_init(&output->base.mode_list);
+
+	output->parent.output = wl_registry_bind(c->parent.registry, id,
+						 &wl_output_interface, 1);
+	if (!output->parent.output)
+		goto err_free;
+	wl_output_add_listener(output->parent.output, &output_listener, output);
+	
+	if (c->parent.system_compositor) {
+		if (wayland_output_initialize(c, output))
+			goto err_proxy_destroy;
+	}
+
+	wl_list_insert(&c->output_list, &output->link);
+
+	return;
+
 err_proxy_destroy:
 	wl_output_destroy(output->parent.output);
 err_free:
@@ -383,7 +405,6 @@ err_free:
 		free(mode);
 	}
 	free(output);
-	return -1;
 }
 
 /* parent input interface */
@@ -626,7 +647,7 @@ registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
 			wl_registry_bind(registry, name,
 					 &wl_compositor_interface, 1);
 	} else if (strcmp(interface, "wl_output") == 0) {
-		wayland_compositor_create_output(c, name);
+		wayland_output_create(c, name);
 	} else if (strcmp(interface, "wl_system_compositor") == 0) {
 		c->parent.system_compositor =
 			wl_registry_bind(registry, name,
@@ -689,6 +710,7 @@ wayland_compositor_create(struct wl_display *display,
 			  struct weston_config *config)
 {
 	struct wayland_compositor *c;
+	struct wayland_output *output;
 	struct wl_event_loop *loop;
 	int fd;
 
@@ -710,6 +732,7 @@ wayland_compositor_create(struct wl_display *display,
 	}
 
 	wl_list_init(&c->input_list);
+	wl_list_init(&c->output_list);
 
 	c->base.wl_display = display;
 	if (gl_renderer_create(&c->base, c->parent.display,
@@ -719,8 +742,16 @@ wayland_compositor_create(struct wl_display *display,
 
 	c->parent.registry = wl_display_get_registry(c->parent.display);
 	wl_registry_add_listener(c->parent.registry, &registry_listener, c);
+
+	/* One to get globals */
 	wl_display_roundtrip(c->parent.display);
+	assert(c->parent.system_compositor);
+	/* One to get output modes */
 	wl_display_roundtrip(c->parent.display);
+
+	wl_list_for_each(output, &c->output_list, link) {
+		wayland_output_initialize(c, output);
+	}
 
 	c->base.destroy = wayland_destroy;
 	c->base.restore = wayland_restore;
