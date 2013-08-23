@@ -70,6 +70,7 @@ struct wayland_output {
 
 		struct weston_mode *current_mode;
 		struct weston_mode *preferred_mode;
+		int32_t x, y;
 	} parent;
 
 	struct wl_list link;
@@ -232,23 +233,30 @@ static const struct wl_shell_surface_listener shell_surface_listener;
 static void
 wayland_output_handle_geometry(void *data,
 			       struct wl_output *wl_output,
-			       int x,
-			       int y,
-			       int physical_width,
-			       int physical_height,
-			       int subpixel,
+			       int32_t x,
+			       int32_t y,
+			       int32_t physical_width,
+			       int32_t physical_height,
+			       int32_t subpixel,
 			       const char *make,
 			       const char *model,
-			       int transform)
+			       int32_t transform)
 {
 	struct wayland_output *output = data;
 
 	output->base.mm_width = physical_width;
 	output->base.mm_height = physical_height;
 	output->base.subpixel = subpixel;
+	if (output->base.make)
+		free(output->base.make);
 	output->base.make = strdup(make);
+	if (output->base.model)
+		free(output->base.model);
 	output->base.model = strdup(model);
 	output->base.transform = transform;
+
+	output->parent.x = x;
+	output->parent.y = y;
 }
 
 static struct weston_mode *
@@ -325,7 +333,7 @@ wayland_output_initialize(struct wayland_compositor *c,
 			   output->base.transform, 1);
 
 	/* XXX: Maybe (0, 0) isn't the best here */
-	weston_output_move(&output->base, 0, 0);
+	weston_output_move(&output->base, output->parent.x, output->parent.y);
 
 	output->parent.surface =
 		wl_compositor_create_surface(c->parent.compositor);
@@ -342,8 +350,7 @@ wayland_output_initialize(struct wayland_compositor *c,
 			output->parent.egl_window) < 0)
 		goto err_output_destroy;
 
-	if (!c->parent.system_compositor)
-		goto err_output_destroy;
+	assert(c->parent.system_compositor);
 	wl_system_compositor_present_surface(c->parent.system_compositor,
 					     output->parent.surface,
 					     WL_SYSTEM_COMPOSITOR_FULLSCREEN_METHOD_DEFAULT,
@@ -389,11 +396,17 @@ wayland_output_create(struct wayland_compositor *c, uint32_t id)
 	if (!output->parent.output)
 		goto err_free;
 	wl_output_add_listener(output->parent.output, &output_listener, output);
+
+	/* Get output modes.
+	 *
+	 * Incidentially, this will also ensure we have the system
+	 * compositor global.
+	 */
+	wl_display_roundtrip(c->parent.display);
 	
-	if (c->parent.system_compositor) {
-		if (wayland_output_initialize(c, output))
-			goto err_proxy_destroy;
-	}
+	assert(c->parent.system_compositor);
+	if (wayland_output_initialize(c, output))
+		goto err_proxy_destroy;
 
 	wl_list_insert(&c->output_list, &output->link);
 
@@ -712,7 +725,6 @@ wayland_compositor_create(struct wl_display *display,
 			  struct weston_config *config)
 {
 	struct wayland_compositor *c;
-	struct wayland_output *output;
 	struct wl_event_loop *loop;
 	int fd;
 
@@ -745,15 +757,8 @@ wayland_compositor_create(struct wl_display *display,
 	c->parent.registry = wl_display_get_registry(c->parent.display);
 	wl_registry_add_listener(c->parent.registry, &registry_listener, c);
 
-	/* One to get globals */
+	/* Round-trip to get globals and set up outputs */
 	wl_display_roundtrip(c->parent.display);
-	assert(c->parent.system_compositor);
-	/* One to get output modes */
-	wl_display_roundtrip(c->parent.display);
-
-	wl_list_for_each(output, &c->output_list, link) {
-		wayland_output_initialize(c, output);
-	}
 
 	c->base.destroy = wayland_destroy;
 	c->base.restore = wayland_restore;
