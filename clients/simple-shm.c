@@ -182,7 +182,8 @@ destroy_window(struct window *window)
 	if (window->buffers[1].buffer)
 		wl_buffer_destroy(window->buffers[1].buffer);
 
-	wl_shell_surface_destroy(window->shell_surface);
+	if (window->shell_surface)
+		wl_shell_surface_destroy(window->shell_surface);
 	wl_surface_destroy(window->surface);
 	free(window);
 }
