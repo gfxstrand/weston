@@ -22,12 +22,23 @@
       <description summary="present surface for display">
 	This requests the system compositor to display surface on output.
 	Each client of the system compositor can have at most one surface
-  per output at any one time. Subsequent requests with the same output
-  replace the surface bound to that output.
+	per output at any one time. Subsequent requests with the same
+	output replace the surface bound to that output.  The same surface
+	may be presented on multiple outputs.
+
+	If the output is null, the compositor will present the surface on
+	whatever display (or displays) it thinks best.  In particular, this
+	may replace any or all surfaces currently presented so it should
+	not be used in combination with placing surfaces on specific
+	outputs.
+
+	The method specifies how the surface is to be persented.  These
+	methods are identical to those in wl_shell_surface.set_fullscreen.
       </description>
       <arg name="surface" type="object" interface="wl_surface"/>
       <arg name="method" type="uint"/>
       <arg name="framerate" type="uint"/>
       <arg name="output" type="object" interface="wl_output" allow-null="true"/>
     </request>
+  </interface>
 </protocol>
