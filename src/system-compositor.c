@@ -44,6 +44,7 @@ struct system_compositor {
 struct sc_surface {
 	struct weston_surface *surface;
 	struct weston_surface *black_surface;
+	struct wl_listener surface_destroyed;
 	struct wl_list link;
 
 	enum wl_system_compositor_fullscreen_method method;
@@ -314,6 +315,15 @@ configure_presented_surface(struct weston_surface *surface, int32_t sx,
 }
 
 static void
+client_surface_destroyed(struct wl_listener *listener, void *data)
+{
+	struct sc_surface *scsurf = container_of(listener,
+						 struct sc_surface,
+						 surface_destroyed);
+	scsurf->surface = NULL;
+}
+
+static void
 system_compositor_present_surface(struct wl_client *client,
 				  struct wl_resource *resource,
 				  struct wl_resource *surface_res,
@@ -323,7 +333,7 @@ system_compositor_present_surface(struct wl_client *client,
 	struct system_compositor *syscomp =
 		wl_resource_get_user_data(resource);
 	struct weston_output *output;
-	struct weston_surface *surface = wl_resource_get_user_data(surface_res);
+	struct weston_surface *surface;
 	struct sc_surface *scsurf;
 
 	if (output_res) {
@@ -339,6 +349,8 @@ system_compositor_present_surface(struct wl_client *client,
 	scsurf = find_surface_for_output(syscomp, output);
 
 	if (surface_res) {
+		surface = wl_resource_get_user_data(surface_res);
+
 		if (surface->configure_private) {
 			wl_resource_post_error(surface_res,
 					       WL_DISPLAY_ERROR_INVALID_OBJECT,
@@ -349,6 +361,7 @@ system_compositor_present_surface(struct wl_client *client,
 		if (scsurf == NULL) {
 			scsurf = malloc(sizeof *scsurf);
 			memset(scsurf, 0, sizeof *scsurf);
+			scsurf->surface_destroyed.notify = client_surface_destroyed;
 			scsurf->black_surface =
 				create_black_surface(syscomp->compositor,
 						     scsurf,
@@ -367,21 +380,23 @@ system_compositor_present_surface(struct wl_client *client,
 			scsurf->output = output;
 		}
 
-		if (scsurf->surface && scsurf->surface != surface)
-			weston_surface_unmap(scsurf->surface);
+		if (scsurf->surface != surface) {
+			if (scsurf->surface)
+				weston_surface_unmap(scsurf->surface);
 
-		surface->configure = configure_presented_surface;
-		surface->configure_private = scsurf;
+			surface->configure = configure_presented_surface;
+			surface->configure_private = scsurf;
+			wl_signal_add(&surface->destroy_signal,
+				      &scsurf->surface_destroyed);
 
-		/* Put this surface on the top */
-		wl_list_insert(&syscomp->layer.surface_list,
-			       &surface->layer_link);
+			/* Put this surface on the top */
+			wl_list_insert(&syscomp->layer.surface_list,
+				       &surface->layer_link);
 
-		scsurf->surface = surface;
-		scsurf->method = method;
-		scsurf->framerate = framerate;
-
-		// TODO: Call configure?
+			scsurf->surface = surface;
+			scsurf->method = method;
+			scsurf->framerate = framerate;
+		}
 	} else if (scsurf) {
 		weston_surface_destroy(scsurf->black_surface);
 		weston_surface_unmap(scsurf->surface);
