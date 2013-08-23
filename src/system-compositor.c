@@ -283,7 +283,6 @@ configure_presented_surface(struct weston_surface *surface, int32_t sx,
 		weston_surface_set_position(surface, x, y);
 
 		break;
-		break;
 	case WL_SHELL_SURFACE_FULLSCREEN_METHOD_DRIVER:
 		mode.flags = 0;
 		mode.width = surf_width * surface->buffer_scale;
@@ -312,6 +311,8 @@ configure_presented_surface(struct weston_surface *surface, int32_t sx,
 	default:
 		break;
 	}
+
+	weston_output_schedule_repaint(scsurf->output);
 }
 
 static void
@@ -381,8 +382,11 @@ system_compositor_present_surface(struct wl_client *client,
 		}
 
 		if (scsurf->surface != surface) {
-			if (scsurf->surface)
+			if (scsurf->surface) {
 				weston_surface_unmap(scsurf->surface);
+				surface->configure = NULL;
+				surface->configure_private = NULL;
+			}
 
 			surface->configure = configure_presented_surface;
 			surface->configure_private = scsurf;
@@ -398,8 +402,11 @@ system_compositor_present_surface(struct wl_client *client,
 			scsurf->framerate = framerate;
 		}
 	} else if (scsurf) {
-		weston_surface_destroy(scsurf->black_surface);
 		weston_surface_unmap(scsurf->surface);
+		surface->configure = NULL;
+		surface->configure_private = NULL;
+
+		weston_surface_destroy(scsurf->black_surface);
 		wl_list_remove(&scsurf->link);
 		free(scsurf);
 	}
