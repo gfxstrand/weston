@@ -380,6 +380,9 @@ destroy_display(struct display *display)
 	if (display->shm)
 		wl_shm_destroy(display->shm);
 
+	if (display->shell)
+		wl_shell_destroy(display->shell);
+
 	if (display->systemc)
 		wl_system_compositor_destroy(display->systemc);
 
