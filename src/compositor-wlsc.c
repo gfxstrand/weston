@@ -61,6 +61,7 @@ struct wayland_compositor {
 
 struct wayland_output {
 	struct weston_output base;
+	struct wayland_compositor *compositor;
 
 	struct {
 		struct wl_output *output;
@@ -188,6 +189,7 @@ wayland_output_start_repaint_loop(struct weston_output *output_base)
 	callback = wl_surface_frame(output->parent.surface);
 	wl_callback_add_listener(callback, &frame_listener, output);
 	wl_surface_commit(output->parent.surface);
+	wl_display_flush(output->compositor->parent.display);
 }
 
 static void
@@ -205,7 +207,6 @@ wayland_output_repaint(struct weston_output *output_base,
 
 	pixman_region32_subtract(&ec->primary_plane.damage,
 				 &ec->primary_plane.damage, damage);
-
 }
 
 static void
@@ -380,6 +381,7 @@ wayland_output_create(struct wayland_compositor *c, uint32_t id)
 		return;
 	memset(output, 0, sizeof *output);
 
+	output->compositor = c;
 	wl_list_init(&output->base.mode_list);
 
 	output->parent.output = wl_registry_bind(c->parent.registry, id,
