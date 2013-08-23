@@ -33,6 +33,7 @@
 
 struct system_compositor {
 	struct wl_client *client;
+	struct wl_listener client_destroyed;
 	struct weston_compositor *compositor;
 
 	struct wl_list surfaces_list;
@@ -396,6 +397,15 @@ struct wl_system_compositor_interface system_compositor_implementation = {
 };
 
 static void
+client_destroyed(struct wl_listener *listener, void *data)
+{
+	struct system_compositor *sysc = container_of(listener,
+						      struct system_compositor,
+						      client_destroyed);
+	sysc->client = NULL;
+}
+
+static void
 bind_system_compositor(struct wl_client *client, void *data, uint32_t version,
 		       uint32_t id)
 {
@@ -404,7 +414,10 @@ bind_system_compositor(struct wl_client *client, void *data, uint32_t version,
 
 	if (sysc->client != NULL && sysc->client != client)
 		return;
-	sysc->client = client;
+	else if (sysc->client == NULL) {
+		sysc->client = client;
+		wl_client_add_destroy_listener(client, &sysc->client_destroyed);
+	}
 
 	resource = wl_resource_create(client, &wl_system_compositor_interface,
 				      1, id);
@@ -426,6 +439,8 @@ module_init(struct weston_compositor *compositor,
 
 	memset(sysc, 0, sizeof *sysc);
 	sysc->compositor = compositor;
+
+	sysc->client_destroyed.notify = client_destroyed;
 
 	wl_list_init(&sysc->surfaces_list);
 	sysc->seat_created_listener.notify = seat_created;
