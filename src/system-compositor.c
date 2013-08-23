@@ -37,6 +37,7 @@ struct system_compositor {
 
 	struct wl_list surfaces_list;
 	struct weston_layer layer;
+	struct wl_listener seat_created_listener;
 };
 
 struct sc_surface {
@@ -49,6 +50,73 @@ struct sc_surface {
 	uint32_t framerate;
 	struct weston_output *output;
 };
+
+struct pointer_focus_listener {
+	struct wl_listener pointer_focus;
+	struct wl_listener seat_caps;
+	struct wl_listener seat_destroyed;
+};
+
+static void
+pointer_focus_changed(struct wl_listener *listener, void *data)
+{
+	struct weston_pointer *pointer = data;
+
+	weston_surface_activate(pointer->focus, pointer->seat);
+}
+
+static void
+seat_caps_changed(struct wl_listener *l, void *data)
+{
+	struct weston_seat *seat = data;
+	struct pointer_focus_listener *listener;
+
+	listener = container_of(l, struct pointer_focus_listener, seat_caps);
+
+	/* no pointer */
+	if (seat->pointer) {
+		if (!listener->pointer_focus.link.prev) {
+			wl_signal_add(&seat->pointer->focus_signal,
+				      &listener->pointer_focus);
+		}
+	} else {
+		if (listener->pointer_focus.link.prev) {
+			wl_list_remove(&listener->pointer_focus.link);
+		}
+	}
+}
+
+static void
+seat_destroyed(struct wl_listener *l, void *data)
+{
+	struct pointer_focus_listener *listener;
+
+	listener = container_of(l, struct pointer_focus_listener,
+				seat_destroyed);
+
+	free(listener);
+}
+
+static void
+seat_created(struct wl_listener *l, void *data)
+{
+	struct weston_seat *seat = data;
+	struct pointer_focus_listener *listener;
+
+	listener = malloc(sizeof *listener);
+	if (!listener)
+		return;
+	memset(listener, 0, sizeof *listener);
+
+	listener->pointer_focus.notify = pointer_focus_changed;
+	listener->seat_caps.notify = seat_caps_changed;
+	listener->seat_destroyed.notify = seat_destroyed;
+
+	wl_signal_add(&seat->destroy_signal, &listener->seat_destroyed);
+	wl_signal_add(&seat->updated_caps_signal, &listener->seat_caps);
+
+	seat_caps_changed(&listener->seat_caps, seat);
+}
 
 static void
 black_surface_configure(struct weston_surface *es, int32_t sx, int32_t sy,
@@ -350,6 +418,7 @@ module_init(struct weston_compositor *compositor,
 	    int *argc, char *argv[])
 {
 	struct system_compositor *sysc;
+	struct weston_seat *seat;
 
 	sysc = malloc(sizeof *sysc);
 	if (sysc == NULL)
@@ -359,6 +428,12 @@ module_init(struct weston_compositor *compositor,
 	sysc->compositor = compositor;
 
 	wl_list_init(&sysc->surfaces_list);
+	sysc->seat_created_listener.notify = seat_created;
+	wl_signal_add(&sysc->compositor->seat_created_signal,
+		      &sysc->seat_created_listener);
+	wl_list_for_each(seat, &sysc->compositor->seat_list, link) {
+		seat_created(NULL, seat);
+	}
 
 	wl_global_create(compositor->wl_display,
 			 &wl_system_compositor_interface, 1, sysc,
