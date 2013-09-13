@@ -495,7 +495,7 @@ enum {
 };
 
 struct weston_layer {
-	struct wl_list surface_list;
+	struct wl_list view_list;
 	struct wl_list link;
 };
 
@@ -562,7 +562,7 @@ struct weston_compositor {
 	struct wl_list output_list;
 	struct wl_list seat_list;
 	struct wl_list layer_list;
-	struct wl_list surface_list;
+	struct wl_list view_list;
 	struct wl_list plane_list;
 	struct wl_list key_binding_list;
 	struct wl_list button_binding_list;
@@ -674,53 +674,52 @@ struct weston_subsurface {
 	} cached;
 
 	int synchronized;
+
+	/* Used for constructing the view tree */
+	struct wl_list unused_views;
 };
 
-/* Using weston_surface transformations
+/* Using weston_view transformations
  *
- * To add a transformation to a surface, create a struct weston_transform, and
- * add it to the list surface->geometry.transformation_list. Whenever you
- * change the list, anything under surface->geometry, or anything in the
+ * To add a transformation to a view, create a struct weston_transform, and
+ * add it to the list view->geometry.transformation_list. Whenever you
+ * change the list, anything under view->geometry, or anything in the
  * weston_transforms linked into the list, you must call
- * weston_surface_geometry_dirty().
+ * weston_view_geometry_dirty().
  *
  * The order in the list defines the order of transformations. Let the list
  * contain the transformation matrices M1, ..., Mn as head to tail. The
- * transformation is applied to surface-local coordinate vector p as
+ * transformation is applied to view-local coordinate vector p as
  *    P = Mn * ... * M2 * M1 * p
  * to produce the global coordinate vector P. The total transform
  *    Mn * ... * M2 * M1
- * is cached in surface->transform.matrix, and the inverse of it in
- * surface->transform.inverse.
+ * is cached in view->transform.matrix, and the inverse of it in
+ * view->transform.inverse.
  *
- * The list always contains surface->transform.position transformation, which
- * is the translation by surface->geometry.x and y.
+ * The list always contains view->transform.position transformation, which
+ * is the translation by view->geometry.x and y.
  *
  * If you want to apply a transformation in local coordinates, add your
  * weston_transform to the head of the list. If you want to apply a
  * transformation in global coordinates, add it to the tail of the list.
  *
- * If surface->geometry.parent is set, the total transformation of this
- * surface will be the parent's total transformation and this transformation
+ * If view->geometry.parent is set, the total transformation of this
+ * view will be the parent's total transformation and this transformation
  * combined:
  *    Mparent * Mn * ... * M2 * M1
  */
 
-struct weston_surface {
-	struct wl_resource *resource;
+struct weston_view {
+	struct weston_surface *surface;
+	struct wl_list surface_link;
 	struct wl_signal destroy_signal;
-	struct weston_compositor *compositor;
-	pixman_region32_t clip;
-	pixman_region32_t damage;
-	pixman_region32_t opaque;        /* part of geometry, see below */
-	pixman_region32_t input;
+
 	struct wl_list link;
 	struct wl_list layer_link;
-	float alpha;                     /* part of geometry, see below */
 	struct weston_plane *plane;
-	int32_t ref_count;
 
-	void *renderer_state;
+	pixman_region32_t clip;
+	float alpha;                     /* part of geometry, see below */
 
 	/* Surface geometry state, mutable.
 	 * If you change anything, call weston_surface_geometry_dirty().
@@ -734,14 +733,14 @@ struct weston_surface {
 		struct wl_list transformation_list;
 
 		/* managed by weston_surface_set_transform_parent() */
-		struct weston_surface *parent;
+		struct weston_view *parent;
 		struct wl_listener parent_destroy_listener;
 		struct wl_list child_list; /* geometry.parent_link */
 		struct wl_list parent_link;
 	} geometry;
 
 	/* State derived from geometry state, read-only.
-	 * This is updated by weston_surface_update_transform().
+	 * This is updated by weston_view_update_transform().
 	 */
 	struct {
 		int dirty;
@@ -758,6 +757,39 @@ struct weston_surface {
 
 		struct weston_transform position; /* matrix from x, y */
 	} transform;
+
+	/*
+	 * Which output to vsync this surface to.
+	 * Used to determine, whether to send or queue frame events.
+	 * Must be NULL, if 'link' is not in weston_compositor::surface_list.
+	 */
+	struct weston_output *output;
+
+	/*
+	 * A more complete representation of all outputs this surface is
+	 * displayed on.
+	 */
+	uint32_t output_mask;
+};
+
+struct weston_surface {
+	struct wl_resource *resource;
+	struct wl_signal destroy_signal;
+	struct weston_compositor *compositor;
+	pixman_region32_t damage;
+	pixman_region32_t opaque;        /* part of geometry, see below */
+	pixman_region32_t input;
+	int32_t width, height;
+	int32_t ref_count;
+
+	/* Not for long-term storage.  This exists for book-keeping while
+	 * iterating over surfaces and views
+	 */
+	int32_t touched;
+
+	void *renderer_state;
+
+	struct wl_list views;
 
 	/*
 	 * Which output to vsync this surface to.
@@ -832,29 +864,29 @@ void
 weston_version(int *major, int *minor, int *micro);
 
 void
-weston_surface_update_transform(struct weston_surface *surface);
+weston_view_update_transform(struct weston_view *view);
 
 void
-weston_surface_geometry_dirty(struct weston_surface *surface);
+weston_view_geometry_dirty(struct weston_view *view);
 
 void
-weston_surface_to_global_fixed(struct weston_surface *surface,
-			       wl_fixed_t sx, wl_fixed_t sy,
-			       wl_fixed_t *x, wl_fixed_t *y);
+weston_view_to_global_fixed(struct weston_view *view,
+			    wl_fixed_t sx, wl_fixed_t sy,
+			    wl_fixed_t *x, wl_fixed_t *y);
 void
-weston_surface_to_global_float(struct weston_surface *surface,
-			       float sx, float sy, float *x, float *y);
+weston_view_to_global_float(struct weston_view *view,
+			    float sx, float sy, float *x, float *y);
 
 void
-weston_surface_from_global_float(struct weston_surface *surface,
-				 float x, float y, float *sx, float *sy);
+weston_view_from_global_float(struct weston_view *view,
+			      float x, float y, float *vx, float *vy);
 void
-weston_surface_from_global(struct weston_surface *surface,
-			   int32_t x, int32_t y, int32_t *sx, int32_t *sy);
+weston_view_from_global(struct weston_view *view,
+			int32_t x, int32_t y, int32_t *vx, int32_t *vy);
 void
-weston_surface_from_global_fixed(struct weston_surface *surface,
-			         wl_fixed_t x, wl_fixed_t y,
-			         wl_fixed_t *sx, wl_fixed_t *sy);
+weston_view_from_global_fixed(struct weston_view *view,
+			      wl_fixed_t x, wl_fixed_t y,
+			      wl_fixed_t *vx, wl_fixed_t *vy);
 int32_t
 weston_surface_buffer_width(struct weston_surface *surface);
 int32_t
@@ -865,8 +897,7 @@ weston_surface_to_buffer_float(struct weston_surface *surface,
 			       float x, float y, float *bx, float *by);
 WL_EXPORT void
 weston_surface_to_buffer(struct weston_surface *surface,
-                         int sx, int sy, int *bx, int *by);
-
+			 int sx, int sy, int *bx, int *by);
 pixman_box32_t
 weston_surface_to_buffer_rect(struct weston_surface *surface,
 			      pixman_box32_t rect);
@@ -948,10 +979,10 @@ void
 weston_compositor_offscreen(struct weston_compositor *compositor);
 void
 weston_compositor_sleep(struct weston_compositor *compositor);
-struct weston_surface *
-weston_compositor_pick_surface(struct weston_compositor *compositor,
-			       wl_fixed_t x, wl_fixed_t y,
-			       wl_fixed_t *sx, wl_fixed_t *sy);
+struct weston_view *
+weston_compositor_pick_view(struct weston_compositor *compositor,
+			    wl_fixed_t x, wl_fixed_t y,
+			    wl_fixed_t *sx, wl_fixed_t *sy);
 
 
 struct weston_binding;
@@ -1024,20 +1055,32 @@ weston_compositor_top(struct weston_compositor *compositor);
 struct weston_surface *
 weston_surface_create(struct weston_compositor *compositor);
 
-void
-weston_surface_configure(struct weston_surface *surface,
-			 float x, float y, int width, int height);
+struct weston_view *
+weston_view_create(struct weston_surface *surface);
 
 void
-weston_surface_restack(struct weston_surface *surface, struct wl_list *below);
+weston_view_destroy(struct weston_view *view);
 
 void
-weston_surface_set_position(struct weston_surface *surface,
-			    float x, float y);
+weston_view_configure(struct weston_view *view,
+		      float x, float y, int width, int height);
 
 void
-weston_surface_set_transform_parent(struct weston_surface *surface,
-				    struct weston_surface *parent);
+weston_view_restack(struct weston_view *surface, struct wl_list *below);
+
+void
+weston_view_set_position(struct weston_view *view,
+			 float x, float y);
+
+void
+weston_view_set_transform_parent(struct weston_view *view,
+				 struct weston_view *parent);
+
+int
+weston_view_is_mapped(struct weston_view *view);
+
+void
+weston_view_schedule_repaint(struct weston_view *view);
 
 int
 weston_surface_is_mapped(struct weston_surface *surface);
@@ -1049,11 +1092,14 @@ void
 weston_surface_damage(struct weston_surface *surface);
 
 void
-weston_surface_damage_below(struct weston_surface *surface);
+weston_view_damage_below(struct weston_view *view);
 
 void
-weston_surface_move_to_plane(struct weston_surface *surface,
-			     struct weston_plane *plane);
+weston_view_move_to_plane(struct weston_view *view,
+			  struct weston_plane *plane);
+void
+weston_view_unmap(struct weston_view *view);
+
 void
 weston_surface_unmap(struct weston_surface *surface);
 
