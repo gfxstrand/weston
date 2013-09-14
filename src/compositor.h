@@ -92,6 +92,8 @@ struct weston_shell_interface {
 	struct shell_surface *(*create_shell_surface)(void *shell,
 						      struct weston_surface *surface,
 						      const struct weston_shell_client *client);
+	struct weston_view *(*get_primary_view)(void *shell,
+						struct shell_surface *shsurf);
 
 	void (*set_toplevel)(struct shell_surface *shsurf);
 
