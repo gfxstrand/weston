@@ -1231,23 +1231,23 @@ weston_client_launch(struct weston_compositor *compositor,
 void
 weston_watch_process(struct weston_process *process);
 
-struct weston_surface_animation;
-typedef	void (*weston_surface_animation_done_func_t)(struct weston_surface_animation *animation, void *data);
+struct weston_view_animation;
+typedef	void (*weston_view_animation_done_func_t)(struct weston_view_animation *animation, void *data);
 
-struct weston_surface_animation *
-weston_zoom_run(struct weston_surface *surface, float start, float stop,
-		weston_surface_animation_done_func_t done, void *data);
+struct weston_view_animation *
+weston_zoom_run(struct weston_view *view, float start, float stop,
+		weston_view_animation_done_func_t done, void *data);
 
-struct weston_surface_animation *
-weston_fade_run(struct weston_surface *surface,
+struct weston_view_animation *
+weston_fade_run(struct weston_view *view,
 		float start, float end, float k,
-		weston_surface_animation_done_func_t done, void *data);
+		weston_view_animation_done_func_t done, void *data);
 void
-weston_fade_update(struct weston_surface_animation *fade, float target);
+weston_fade_update(struct weston_view_animation *fade, float target);
 
-struct weston_surface_animation *
-weston_slide_run(struct weston_surface *surface, float start, float stop,
-		 weston_surface_animation_done_func_t done, void *data);
+struct weston_view_animation *
+weston_slide_run(struct weston_view *view, float start, float stop,
+		 weston_view_animation_done_func_t done, void *data);
 
 void
 weston_surface_set_color(struct weston_surface *surface,
