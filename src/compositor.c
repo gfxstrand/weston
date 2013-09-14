@@ -587,7 +587,7 @@ weston_surface_assign_output(struct weston_surface *es)
 
 		mask |= view->output_mask;
 
-		if (area > max) {
+		if (area >= max) {
 			new_output = view->output;
 			max = area;
 		}
@@ -621,7 +621,7 @@ weston_view_assign_output(struct weston_view *ev)
 		if (area > 0)
 			mask |= 1 << output->id;
 
-		if (area > max) {
+		if (area >= max) {
 			new_output = output;
 			max = area;
 		}
@@ -1092,6 +1092,7 @@ weston_surface_unmap(struct weston_surface *surface)
 
 	wl_list_for_each(view, &surface->views, surface_link)
 		weston_view_unmap(view);
+	surface->output = NULL;
 }
 
 struct weston_frame_callback {
