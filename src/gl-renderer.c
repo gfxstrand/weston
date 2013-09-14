@@ -454,7 +454,7 @@ clip_polygon_bottom(struct clip_context *ctx, const struct polygon8 *src,
  * polygon area.
  */
 static int
-calculate_edges(struct weston_surface *es, pixman_box32_t *rect,
+calculate_edges(struct weston_view *ev, pixman_box32_t *rect,
 		pixman_box32_t *surf_rect, GLfloat *ex, GLfloat *ey)
 {
 	struct polygon8 polygon;
@@ -474,8 +474,8 @@ calculate_edges(struct weston_surface *es, pixman_box32_t *rect,
 
 	/* transform surface to screen space: */
 	for (i = 0; i < surf.n; i++)
-		weston_surface_to_global_float(es, surf.x[i], surf.y[i],
-					       &surf.x[i], &surf.y[i]);
+		weston_view_to_global_float(ev, surf.x[i], surf.y[i],
+					    &surf.x[i], &surf.y[i]);
 
 	/* find bounding box: */
 	min_x = max_x = surf.x[0];
@@ -499,7 +499,7 @@ calculate_edges(struct weston_surface *es, pixman_box32_t *rect,
 	 * there will be only four edges.  We just need to clip the surface
 	 * vertices to the clip rect bounds:
 	 */
-	if (!es->transform.enabled) {
+	if (!ev->transform.enabled) {
 		for (i = 0; i < surf.n; i++) {
 			ex[i] = clip(surf.x[i], ctx.clip.x1, ctx.clip.x2);
 			ey[i] = clip(surf.y[i], ctx.clip.y1, ctx.clip.y2);
@@ -541,11 +541,11 @@ calculate_edges(struct weston_surface *es, pixman_box32_t *rect,
 }
 
 static int
-texture_region(struct weston_surface *es, pixman_region32_t *region,
+texture_region(struct weston_view *ev, pixman_region32_t *region,
 		pixman_region32_t *surf_region)
 {
-	struct gl_surface_state *gs = get_surface_state(es);
-	struct weston_compositor *ec = es->compositor;
+	struct gl_surface_state *gs = get_surface_state(ev->surface);
+	struct weston_compositor *ec = ev->surface->compositor;
 	struct gl_renderer *gr = get_renderer(ec);
 	GLfloat *v, inv_width, inv_height;
 	unsigned int *vtxcnt, nvtx = 0;
@@ -586,18 +586,20 @@ texture_region(struct weston_surface *es, pixman_region32_t *region,
 			 * form the intersection of the clip rect and the transformed
 			 * surface.
 			 */
-			n = calculate_edges(es, rect, surf_rect, ex, ey);
+			n = calculate_edges(ev, rect, surf_rect, ex, ey);
 			if (n < 3)
 				continue;
 
 			/* emit edge points: */
 			for (k = 0; k < n; k++) {
-				weston_surface_from_global_float(es, ex[k], ey[k], &sx, &sy);
+				weston_view_from_global_float(ev, ex[k], ey[k],
+							      &sx, &sy);
 				/* position: */
 				*(v++) = ex[k];
 				*(v++) = ey[k];
 				/* texcoord: */
-				weston_surface_to_buffer_float(es, sx, sy,
+				weston_surface_to_buffer_float(ev->surface,
+							       sx, sy,
 							       &bx, &by);
 				*(v++) = bx * inv_width;
 				if (gs->y_inverted) {
@@ -615,9 +617,9 @@ texture_region(struct weston_surface *es, pixman_region32_t *region,
 }
 
 static void
-triangle_fan_debug(struct weston_surface *surface, int first, int count)
+triangle_fan_debug(struct weston_view *view, int first, int count)
 {
-	struct weston_compositor *compositor = surface->compositor;
+	struct weston_compositor *compositor = view->surface->compositor;
 	struct gl_renderer *gr = get_renderer(compositor);
 	int i;
 	GLushort *buffer;
@@ -655,10 +657,10 @@ triangle_fan_debug(struct weston_surface *surface, int first, int count)
 }
 
 static void
-repaint_region(struct weston_surface *es, pixman_region32_t *region,
+repaint_region(struct weston_view *ev, pixman_region32_t *region,
 		pixman_region32_t *surf_region)
 {
-	struct weston_compositor *ec = es->compositor;
+	struct weston_compositor *ec = ev->surface->compositor;
 	struct gl_renderer *gr = get_renderer(ec);
 	GLfloat *v;
 	unsigned int *vtxcnt;
@@ -672,7 +674,7 @@ repaint_region(struct weston_surface *es, pixman_region32_t *region,
 	 * polygon for each pair, and store it as a triangle fan if
 	 * it has a non-zero area (at least 3 vertices1, actually).
 	 */
-	nfans = texture_region(es, region, surf_region);
+	nfans = texture_region(ev, region, surf_region);
 
 	v = gr->vertices.data;
 	vtxcnt = gr->vtxcnt.data;
@@ -688,7 +690,7 @@ repaint_region(struct weston_surface *es, pixman_region32_t *region,
 	for (i = 0, first = 0; i < nfans; i++) {
 		glDrawArrays(GL_TRIANGLE_FAN, first, vtxcnt[i]);
 		if (gr->fan_debug)
-			triangle_fan_debug(es, first, vtxcnt[i]);
+			triangle_fan_debug(ev, first, vtxcnt[i]);
 		first += vtxcnt[i];
 	}
 
@@ -748,28 +750,28 @@ use_shader(struct gl_renderer *gr, struct gl_shader *shader)
 
 static void
 shader_uniforms(struct gl_shader *shader,
-		       struct weston_surface *surface,
-		       struct weston_output *output)
+		struct weston_view *view,
+		struct weston_output *output)
 {
 	int i;
-	struct gl_surface_state *gs = get_surface_state(surface);
+	struct gl_surface_state *gs = get_surface_state(view->surface);
 
 	glUniformMatrix4fv(shader->proj_uniform,
 			   1, GL_FALSE, output->matrix.d);
 	glUniform4fv(shader->color_uniform, 1, gs->color);
-	glUniform1f(shader->alpha_uniform, surface->alpha);
+	glUniform1f(shader->alpha_uniform, view->alpha);
 
 	for (i = 0; i < gs->num_textures; i++)
 		glUniform1i(shader->tex_uniforms[i], i);
 }
 
 static void
-draw_surface(struct weston_surface *es, struct weston_output *output,
-	     pixman_region32_t *damage) /* in global coordinates */
+draw_view(struct weston_view *ev, struct weston_output *output,
+	  pixman_region32_t *damage) /* in global coordinates */
 {
-	struct weston_compositor *ec = es->compositor;
+	struct weston_compositor *ec = ev->surface->compositor;
 	struct gl_renderer *gr = get_renderer(ec);
-	struct gl_surface_state *gs = get_surface_state(es);
+	struct gl_surface_state *gs = get_surface_state(ev->surface);
 	/* repaint bounding region in global coordinates: */
 	pixman_region32_t repaint;
 	/* non-opaque region in surface coordinates: */
@@ -779,8 +781,8 @@ draw_surface(struct weston_surface *es, struct weston_output *output,
 
 	pixman_region32_init(&repaint);
 	pixman_region32_intersect(&repaint,
-				  &es->transform.boundingbox, damage);
-	pixman_region32_subtract(&repaint, &repaint, &es->clip);
+				  &ev->transform.boundingbox, damage);
+	pixman_region32_subtract(&repaint, &repaint, &ev->clip);
 
 	if (!pixman_region32_not_empty(&repaint))
 		goto out;
@@ -789,13 +791,14 @@ draw_surface(struct weston_surface *es, struct weston_output *output,
 
 	if (gr->fan_debug) {
 		use_shader(gr, &gr->solid_shader);
-		shader_uniforms(&gr->solid_shader, es, output);
+		shader_uniforms(&gr->solid_shader, ev, output);
 	}
 
 	use_shader(gr, gs->shader);
-	shader_uniforms(gs->shader, es, output);
+	shader_uniforms(gs->shader, ev, output);
 
-	if (es->transform.enabled || output->zoom.active || output->scale != es->buffer_scale)
+	if (ev->transform.enabled || output->zoom.active ||
+	    output->scale != ev->surface->buffer_scale)
 		filter = GL_LINEAR;
 	else
 		filter = GL_NEAREST;
@@ -809,10 +812,11 @@ draw_surface(struct weston_surface *es, struct weston_output *output,
 
 	/* blended region is whole surface minus opaque region: */
 	pixman_region32_init_rect(&surface_blend, 0, 0,
-				  es->geometry.width, es->geometry.height);
-	pixman_region32_subtract(&surface_blend, &surface_blend, &es->opaque);
+				  ev->geometry.width, ev->geometry.height);
+	pixman_region32_subtract(&surface_blend, &surface_blend, &ev->surface->opaque);
 
-	if (pixman_region32_not_empty(&es->opaque)) {
+	/* XXX: Should we be using ev->transform.opaque here? */
+	if (pixman_region32_not_empty(&ev->surface->opaque)) {
 		if (gs->shader == &gr->texture_shader_rgba) {
 			/* Special case for RGBA textures with possibly
 			 * bad data in alpha channel: use the shader
@@ -820,21 +824,21 @@ draw_surface(struct weston_surface *es, struct weston_output *output,
 			 * Xwayland surfaces need this.
 			 */
 			use_shader(gr, &gr->texture_shader_rgbx);
-			shader_uniforms(&gr->texture_shader_rgbx, es, output);
+			shader_uniforms(&gr->texture_shader_rgbx, ev, output);
 		}
 
-		if (es->alpha < 1.0)
+		if (ev->alpha < 1.0)
 			glEnable(GL_BLEND);
 		else
 			glDisable(GL_BLEND);
 
-		repaint_region(es, &repaint, &es->opaque);
+		repaint_region(ev, &repaint, &ev->surface->opaque);
 	}
 
 	if (pixman_region32_not_empty(&surface_blend)) {
 		use_shader(gr, gs->shader);
 		glEnable(GL_BLEND);
-		repaint_region(es, &repaint, &surface_blend);
+		repaint_region(ev, &repaint, &surface_blend);
 	}
 
 	pixman_region32_fini(&surface_blend);
@@ -844,14 +848,14 @@ out:
 }
 
 static void
-repaint_surfaces(struct weston_output *output, pixman_region32_t *damage)
+repaint_views(struct weston_output *output, pixman_region32_t *damage)
 {
 	struct weston_compositor *compositor = output->compositor;
-	struct weston_surface *surface;
+	struct weston_view *view;
 
-	wl_list_for_each_reverse(surface, &compositor->surface_list, link)
-		if (surface->plane == &compositor->primary_plane)
-			draw_surface(surface, output, damage);
+	wl_list_for_each_reverse(view, &compositor->view_list, link)
+		if (view->plane == &compositor->primary_plane)
+			draw_view(view, output, damage);
 }
 
 
@@ -1046,7 +1050,7 @@ gl_renderer_repaint_output(struct weston_output *output,
 		pixman_region32_subtract(&undamaged, &output->region,
 					 output_damage);
 		gr->fan_debug = 0;
-		repaint_surfaces(output, &undamaged);
+		repaint_views(output, &undamaged);
 		gr->fan_debug = 1;
 		pixman_region32_fini(&undamaged);
 	}
@@ -1059,7 +1063,7 @@ gl_renderer_repaint_output(struct weston_output *output,
 
 	pixman_region32_union(&total_damage, &buffer_damage, output_damage);
 
-	repaint_surfaces(output, &total_damage);
+	repaint_views(output, &total_damage);
 
 	pixman_region32_fini(&total_damage);
 	pixman_region32_fini(&buffer_damage);
@@ -1114,6 +1118,8 @@ gl_renderer_flush_damage(struct weston_surface *surface)
 	struct gl_renderer *gr = get_renderer(surface->compositor);
 	struct gl_surface_state *gs = get_surface_state(surface);
 	struct weston_buffer *buffer = gs->buffer_ref.buffer;
+	struct weston_view *view;
+	int texture_used;
 	GLenum format;
 	int pixel_type;
 
@@ -1134,7 +1140,14 @@ gl_renderer_flush_damage(struct weston_surface *surface)
 	 * hold the reference to the buffer, in case the surface
 	 * migrates back to the primary plane.
 	 */
-	if (surface->plane != &surface->compositor->primary_plane)
+	texture_used = 0;
+	wl_list_for_each(view, &surface->views, surface_link) {
+		if (view->plane == &surface->compositor->primary_plane) {
+			texture_used = 1;
+			break;
+		}
+	}
+	if (!texture_used)
 		return;
 
 	if (!pixman_region32_not_empty(&gs->texture_damage))
