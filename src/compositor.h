@@ -302,13 +302,13 @@ struct weston_pointer {
 	struct weston_seat *seat;
 
 	struct wl_list resource_list;
-	struct weston_surface *focus;
+	struct weston_view *focus;
 	struct wl_resource *focus_resource;
 	struct wl_listener focus_listener;
 	uint32_t focus_serial;
 	struct wl_signal focus_signal;
 
-	struct weston_surface *sprite;
+	struct weston_view *sprite;
 	struct wl_listener sprite_destroy_listener;
 	int32_t hotspot_x, hotspot_y;
 
@@ -328,7 +328,7 @@ struct weston_touch {
 	struct weston_seat *seat;
 
 	struct wl_list resource_list;
-	struct weston_surface *focus;
+	struct weston_view *focus;
 	struct wl_resource *focus_resource;
 	struct wl_listener focus_listener;
 	uint32_t focus_serial;
@@ -347,7 +347,7 @@ void
 weston_pointer_destroy(struct weston_pointer *pointer);
 void
 weston_pointer_set_focus(struct weston_pointer *pointer,
-			 struct weston_surface *surface,
+			 struct weston_view *view,
 			 wl_fixed_t sx, wl_fixed_t sy);
 void
 weston_pointer_start_grab(struct weston_pointer *pointer,
@@ -377,7 +377,7 @@ void
 weston_touch_destroy(struct weston_touch *touch);
 void
 weston_touch_set_focus(struct weston_seat *seat,
-			  struct weston_surface *surface);
+		       struct weston_view *view);
 void
 weston_touch_start_grab(struct weston_touch *device,
 			struct weston_touch_grab *grab);
