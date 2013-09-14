@@ -119,7 +119,7 @@ struct desktop_shell {
 	bool prepare_event_sent;
 
 	struct {
-		struct weston_view *view;
+		struct weston_surface *surface;
 		pixman_box32_t cursor_rectangle;
 	} text_input;
 
@@ -3440,9 +3440,7 @@ show_input_panels(struct wl_listener *listener, void *data)
 			     show_input_panel_listener);
 	struct input_panel_surface *ipsurf, *next;
 
-	/* TODO
 	shell->text_input.surface = (struct weston_surface*)data;
-	*/
 
 	if (shell->showing_input_panels)
 		return;
@@ -3971,8 +3969,8 @@ input_panel_configure(struct weston_surface *surface, int32_t sx, int32_t sy, in
 	fprintf(stderr, "%s panel: %d, output: %p\n", __FUNCTION__, ip_surface->panel, ip_surface->output);
 
 	if (ip_surface->panel) {
-		x = shell->text_input.view->geometry.x + shell->text_input.cursor_rectangle.x2;
-		y = shell->text_input.view->geometry.y + shell->text_input.cursor_rectangle.y2;
+		x = get_default_view(shell->text_input.surface)->geometry.x + shell->text_input.cursor_rectangle.x2;
+		y = get_default_view(shell->text_input.surface)->geometry.y + shell->text_input.cursor_rectangle.y2;
 	} else {
 		x = ip_surface->output->x + (ip_surface->output->width - width) / 2;
 		y = ip_surface->output->y + ip_surface->output->height - height;
