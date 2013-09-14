@@ -140,18 +140,12 @@ struct weston_spring {
 	uint32_t clip;
 };
 
-enum {
-	ZOOM_FOCUS_POINTER,
-	ZOOM_FOCUS_TEXT
-};
-
 struct weston_fixed_point {
 	wl_fixed_t x, y;
 };
 
 struct weston_output_zoom {
 	int active;
-	uint32_t type;
 	float increment;
 	float level;
 	float max_level;
@@ -163,7 +157,6 @@ struct weston_output_zoom {
 	struct weston_fixed_point from;
 	struct weston_fixed_point to;
 	struct weston_fixed_point current;
-	struct weston_fixed_point text_cursor;
 };
 
 /* bit compatible with drm definitions. */
@@ -1122,12 +1115,9 @@ weston_compositor_init(struct weston_compositor *ec, struct wl_display *display,
 void
 weston_compositor_shutdown(struct weston_compositor *ec);
 void
-weston_text_cursor_position_notify(struct weston_surface *surface,
-						wl_fixed_t x, wl_fixed_t y);
-void
 weston_output_init_zoom(struct weston_output *output);
 void
-weston_output_update_zoom(struct weston_output *output, uint32_t type);
+weston_output_update_zoom(struct weston_output *output);
 void
 weston_output_update_matrix(struct weston_output *output);
 void
@@ -1205,9 +1195,6 @@ screenshooter_create(struct weston_compositor *ec);
 
 struct clipboard *
 clipboard_create(struct weston_seat *seat);
-
-void
-text_cursor_position_notifier_create(struct weston_compositor *ec);
 
 int
 text_backend_init(struct weston_compositor *ec);

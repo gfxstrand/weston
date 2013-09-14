@@ -618,7 +618,7 @@ move_pointer(struct weston_seat *seat, wl_fixed_t x, wl_fixed_t y)
 		if (output->zoom.active &&
 		    pixman_region32_contains_point(&output->region,
 						   ix, iy, NULL))
-			weston_output_update_zoom(output, ZOOM_FOCUS_POINTER);
+			weston_output_update_zoom(output);
 
 	if (pointer->sprite) {
 		weston_view_set_position(pointer->sprite,

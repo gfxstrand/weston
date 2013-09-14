@@ -2912,7 +2912,7 @@ weston_output_update_matrix(struct weston_output *output)
 		magnification = 1 / (1 - output->zoom.spring_z.current);
 		weston_matrix_init(&camera);
 		weston_matrix_init(&modelview);
-		weston_output_update_zoom(output, output->zoom.type);
+		weston_output_update_zoom(output);
 		weston_matrix_translate(&camera, output->zoom.trans_x,
 					-output->zoom.trans_y, 0);
 		weston_matrix_invert(&modelview, &camera);
@@ -3170,7 +3170,6 @@ weston_compositor_init(struct weston_compositor *ec,
 	ec->ping_handler = NULL;
 
 	screenshooter_create(ec);
-	text_cursor_position_notifier_create(ec);
 	text_backend_init(ec);
 
 	wl_data_device_manager_init(ec->wl_display);
