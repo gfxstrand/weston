@@ -511,10 +511,12 @@ struct weston_renderer {
 	void (*flush_damage)(struct weston_surface *surface);
 	void (*attach)(struct weston_surface *es, struct weston_buffer *buffer);
 	int (*create_surface)(struct weston_surface *surface);
+	int (*create_view)(struct weston_view *view);
 	void (*surface_set_color)(struct weston_surface *surface,
 			       float red, float green,
 			       float blue, float alpha);
 	void (*destroy_surface)(struct weston_surface *surface);
+	void (*destroy_view)(struct weston_view *view);
 	void (*destroy)(struct weston_compositor *ec);
 };
 
@@ -715,6 +717,8 @@ struct weston_view {
 
 	pixman_region32_t clip;
 	float alpha;                     /* part of geometry, see below */
+
+	void *renderer_state;
 
 	/* Surface geometry state, mutable.
 	 * If you change anything, call weston_surface_geometry_dirty().

@@ -277,6 +277,17 @@ weston_view_create(struct weston_surface *surface)
 	view = calloc(1, sizeof *view);
 	if (view == NULL)
 		return NULL;
+
+	view->surface = surface;
+
+	if (surface->compositor->renderer->create_view &&
+	    surface->compositor->renderer->create_view(view) < 0) {
+		free(view);
+		return NULL;
+	}
+
+	/* Assign to surface */
+	wl_list_insert(&surface->views, &view->surface_link);
 	
 	wl_signal_init(&view->destroy_signal);
 	wl_list_init(&view->link);
@@ -298,10 +309,6 @@ weston_view_create(struct weston_surface *surface)
 	view->transform.dirty = 1;
 
 	view->output = NULL;
-
-	/* Assign to surface */
-	view->surface = surface;
-	wl_list_insert(&surface->views, &view->surface_link);
 
 	return view;
 }
@@ -1119,6 +1126,9 @@ weston_view_destroy(struct weston_view *view)
 	pixman_region32_fini(&view->transform.boundingbox);
 
 	weston_view_set_transform_parent(view, NULL);
+
+	if (view->surface->compositor->renderer->destroy_view)
+		view->surface->compositor->renderer->destroy_view(view);
 
 	wl_list_remove(&view->surface_link);
 
