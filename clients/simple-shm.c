@@ -35,12 +35,14 @@
 #include <wayland-client.h>
 #include "../shared/os-compatibility.h"
 #include "xdg-shell-client-protocol.h"
+#include "fullscreen-shell-client-protocol.h"
 
 struct display {
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
 	struct xdg_shell *shell;
+	struct wl_fullscreen_shell *fshell;
 	struct wl_shm *shm;
 	uint32_t formats;
 };
@@ -178,14 +180,26 @@ create_window(struct display *display, int width, int height)
 	window->width = width;
 	window->height = height;
 	window->surface = wl_compositor_create_surface(display->compositor);
-	window->xdg_surface = xdg_shell_get_xdg_surface(display->shell,
-							window->surface);
 
-	if (window->xdg_surface)
+	if (display->shell) {
+		window->xdg_surface =
+			xdg_shell_get_xdg_surface(display->shell,
+						  window->surface);
+
+		assert(window->xdg_surface);
+
 		xdg_surface_add_listener(window->xdg_surface,
 					 &xdg_surface_listener, window);
 
-	xdg_surface_set_title(window->xdg_surface, "simple-shm");
+		xdg_surface_set_title(window->xdg_surface, "simple-shm");
+	} else if (display->fshell) {
+		wl_fullscreen_shell_present_surface(display->fshell,
+						    window->surface,
+						    WL_FULLSCREEN_SHELL_PRESENT_METHOD_DEFAULT,
+						    NULL);
+	} else {
+		assert(0);
+	}
 
 	return window;
 }
@@ -201,7 +215,8 @@ destroy_window(struct window *window)
 	if (window->buffers[1].buffer)
 		wl_buffer_destroy(window->buffers[1].buffer);
 
-	xdg_surface_destroy(window->xdg_surface);
+	if (window->xdg_surface)
+		xdg_surface_destroy(window->xdg_surface);
 	wl_surface_destroy(window->surface);
 	free(window);
 }
@@ -342,6 +357,9 @@ registry_handle_global(void *data, struct wl_registry *registry,
 		d->shell = wl_registry_bind(registry,
 					    id, &xdg_shell_interface, 1);
 		xdg_shell_use_unstable_version(d->shell, 1);
+	} else if (strcmp(interface, "wl_fullscreen_shell") == 0) {
+		d->fshell = wl_registry_bind(registry,
+					     id, &wl_fullscreen_shell_interface, 1);
 	} else if (strcmp(interface, "wl_shm") == 0) {
 		d->shm = wl_registry_bind(registry,
 					  id, &wl_shm_interface, 1);
@@ -403,6 +421,9 @@ destroy_display(struct display *display)
 
 	if (display->shell)
 		xdg_shell_destroy(display->shell);
+
+	if (display->fshell)
+		wl_fullscreen_shell_release(display->fshell);
 
 	if (display->compositor)
 		wl_compositor_destroy(display->compositor);
