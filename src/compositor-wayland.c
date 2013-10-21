@@ -212,65 +212,67 @@ wayland_output_update_gl_border(struct wayland_output *output)
 	fheight = frame_height(output->frame);
 	frame_interior(output->frame, &ix, &iy, &iwidth, &iheight);
 
-	if (!output->border.top)
-		output->border.top =
+	if (!output->gl.border.top)
+		output->gl.border.top =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 						   fwidth, iy);
-	cr = cairo_create(output->border.top);
+	cr = cairo_create(output->gl.border.top);
 	frame_repaint(output->frame, cr);
 	cairo_destroy(cr);
 	gl_renderer->output_set_border(&output->base, GL_RENDERER_BORDER_TOP,
 				       fwidth, iy,
-				       cairo_image_surface_get_stride(output->border.top) / 4,
-				       cairo_image_surface_get_data(output->border.top));
+				       cairo_image_surface_get_stride(output->gl.border.top) / 4,
+				       cairo_image_surface_get_data(output->gl.border.top));
 
 
-	if (!output->border.left)
-		output->border.left =
+	if (!output->gl.border.left)
+		output->gl.border.left =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 						   ix, 1);
-	cr = cairo_create(output->border.left);
+	cr = cairo_create(output->gl.border.left);
 	cairo_translate(cr, 0, -iy);
 	frame_repaint(output->frame, cr);
 	cairo_destroy(cr);
 	gl_renderer->output_set_border(&output->base, GL_RENDERER_BORDER_LEFT,
 				       ix, 1,
-				       cairo_image_surface_get_stride(output->border.left) / 4,
-				       cairo_image_surface_get_data(output->border.left));
+				       cairo_image_surface_get_stride(output->gl.border.left) / 4,
+				       cairo_image_surface_get_data(output->gl.border.left));
 
 
-	if (!output->border.right)
-		output->border.right =
+	if (!output->gl.border.right)
+		output->gl.border.right =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 						   fwidth - (ix + iwidth), 1);
-	cr = cairo_create(output->border.right);
+	cr = cairo_create(output->gl.border.right);
 	cairo_translate(cr, -(iwidth + ix), -iy);
 	frame_repaint(output->frame, cr);
 	cairo_destroy(cr);
 	gl_renderer->output_set_border(&output->base, GL_RENDERER_BORDER_RIGHT,
 				       fwidth - (ix + iwidth), 1,
-				       cairo_image_surface_get_stride(output->border.right) / 4,
-				       cairo_image_surface_get_data(output->border.right));
+				       cairo_image_surface_get_stride(output->gl.border.right) / 4,
+				       cairo_image_surface_get_data(output->gl.border.right));
 
 
-	if (!output->border.bottom)
-		output->border.bottom =
+	if (!output->gl.border.bottom)
+		output->gl.border.bottom =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 						   fwidth, fheight - (iy + iheight));
-	cr = cairo_create(output->border.bottom);
+	cr = cairo_create(output->gl.border.bottom);
 	cairo_translate(cr, 0, -(iy + iheight));
 	frame_repaint(output->frame, cr);
 	cairo_destroy(cr);
 	gl_renderer->output_set_border(&output->base, GL_RENDERER_BORDER_BOTTOM,
 				       fwidth, fheight - (iy + iheight),
-				       cairo_image_surface_get_stride(output->border.bottom) / 4,
-				       cairo_image_surface_get_data(output->border.bottom));
+				       cairo_image_surface_get_stride(output->gl.border.bottom) / 4,
+				       cairo_image_surface_get_data(output->gl.border.bottom));
 }
 
 static void
 wayland_output_start_repaint_loop(struct weston_output *output_base)
 {
 	struct wayland_output *output = (struct wayland_output *) output_base;
+	struct wayland_compositor *wc =
+		(struct wayland_compositor *)output->base.compositor;
 	struct wl_callback *callback;
 
 	/* If this is the initial frame, we need to attach a buffer so that
@@ -287,6 +289,7 @@ wayland_output_start_repaint_loop(struct weston_output *output_base)
 	callback = wl_surface_frame(output->parent.surface);
 	wl_callback_add_listener(callback, &frame_listener, output);
 	wl_surface_commit(output->parent.surface);
+	wl_display_flush(wc->parent.wl_display);
 }
 
 static void
