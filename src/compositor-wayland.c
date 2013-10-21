@@ -36,6 +36,7 @@
 
 #include "compositor.h"
 #include "gl-renderer.h"
+#include "pixman-renderer.h"
 #include "../shared/image-loader.h"
 #include "../shared/os-compatibility.h"
 #include "../shared/cairo-util.h"
@@ -59,6 +60,8 @@ struct wayland_compositor {
 		uint32_t event_mask;
 	} parent;
 
+	int use_pixman;
+
 	struct theme *theme;
 	cairo_device_t *frame_device;
 	struct wl_cursor_theme *cursor_theme;
@@ -74,20 +77,43 @@ struct wayland_output {
 		int draw_initial_frame;
 		struct wl_surface *surface;
 		struct wl_shell_surface *shell_surface;
-		struct wl_egl_window *egl_window;
 	} parent;
 
 	int keyboard_count;
 
 	struct frame *frame;
+
 	struct {
-		cairo_surface_t *top;
-		cairo_surface_t *left;
-		cairo_surface_t *right;
-		cairo_surface_t *bottom;
-	} border;
+		struct wl_egl_window *egl_window;
+		struct {
+			cairo_surface_t *top;
+			cairo_surface_t *left;
+			cairo_surface_t *right;
+			cairo_surface_t *bottom;
+		} border;
+	} gl;
+
+	struct {
+		struct wl_list buffers;
+		struct wl_list free_buffers;
+	} shm;
 
 	struct weston_mode mode;
+};
+
+struct wayland_shm_buffer {
+	struct wayland_output *output;
+	struct wl_list link;
+	struct wl_list free_link;
+
+	struct wl_buffer *buffer;
+	void *data;
+	size_t size;
+	pixman_region32_t damage;
+	int frame_damaged;
+
+	pixman_image_t *pm_image;
+	cairo_surface_t *c_surface;
 };
 
 struct wayland_input {
@@ -117,6 +143,123 @@ struct wayland_input {
 struct gl_renderer_interface *gl_renderer;
 
 static void
+wayland_shm_buffer_destroy(struct wayland_shm_buffer *buffer)
+{
+	cairo_surface_destroy(buffer->c_surface);
+	pixman_image_unref(buffer->pm_image);
+
+	wl_buffer_destroy(buffer->buffer);
+	munmap(buffer->data, buffer->size);
+
+	pixman_region32_fini(&buffer->damage);
+	
+	wl_list_remove(&buffer->link);
+	wl_list_remove(&buffer->free_link);
+	free(buffer);
+}
+
+static void
+buffer_release(void *data, struct wl_buffer *buffer)
+{
+	struct wayland_shm_buffer *sb = data;
+
+	if (sb->output) {
+		wl_list_insert(&sb->output->shm.free_buffers, &sb->free_link);
+	} else {
+		wayland_shm_buffer_destroy(sb);
+	}
+}
+
+static const struct wl_buffer_listener buffer_listener = {
+	buffer_release
+};
+
+static struct wayland_shm_buffer *
+wayland_output_get_shm_buffer(struct wayland_output *output)
+{
+	struct wayland_compositor *c =
+		(struct wayland_compositor *) output->base.compositor;
+	struct wl_shm *shm = c->parent.shm;
+	struct wayland_shm_buffer *sb;
+
+	struct wl_shm_pool *pool;
+	int width, height, stride;
+	int32_t fx, fy;
+	int fd;
+	unsigned char *data;
+
+	if (!wl_list_empty(&output->shm.free_buffers)) {
+		sb = container_of(output->shm.free_buffers.next,
+				  struct wayland_shm_buffer, free_link);
+		wl_list_remove(&sb->free_link);
+		wl_list_init(&sb->free_link);
+
+		return sb;
+	}
+
+	if (output->frame) {
+		width = frame_width(output->frame);
+		height = frame_height(output->frame);
+	} else {
+		width = output->mode.width;
+		height = output->mode.height;
+	}
+
+	stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
+
+	fd = os_create_anonymous_file(height * stride);
+	if (fd < 0) {
+		perror("os_create_anonymous_file");
+		return NULL;
+	}
+
+	data = mmap(NULL, height * stride, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (data == MAP_FAILED) {
+		perror("mmap");
+		close(fd);
+		return NULL;
+	}
+
+	sb = zalloc(sizeof *sb);
+
+	sb->output = output;
+	wl_list_init(&sb->free_link);
+	wl_list_insert(&output->shm.buffers, &sb->link);
+
+	pixman_region32_init_rect(&sb->damage, 0, 0, width, height);
+
+	sb->data = data;
+	sb->size = height * stride;
+
+	pool = wl_shm_create_pool(shm, fd, sb->size);
+
+	sb->buffer = wl_shm_pool_create_buffer(pool, 0,
+					       width, height,
+					       stride,
+					       WL_SHM_FORMAT_ARGB8888);
+	wl_buffer_add_listener(sb->buffer, &buffer_listener, sb);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+
+	memset(data, 0, sb->size);
+
+	sb->c_surface =
+		cairo_image_surface_create_for_data(data, CAIRO_FORMAT_ARGB32,
+						    width, height, stride);
+	
+	fx = 0;
+	fy = 0;
+	if (output->frame)
+		frame_interior(output->frame, &fx, &fy, 0, 0);
+	sb->pm_image =
+		pixman_image_create_bits(PIXMAN_a8r8g8b8, width, height,
+					 (uint32_t *)(data + fy * stride) + fx,
+					 stride);
+	
+	return sb;
+}
+
+static void
 frame_done(void *data, struct wl_callback *callback, uint32_t time)
 {
 	struct weston_output *output = data;
@@ -130,71 +273,22 @@ static const struct wl_callback_listener frame_listener = {
 };
 
 static void
-buffer_release(void *data, struct wl_buffer *buffer)
-{
-	wl_buffer_destroy(buffer);
-}
-
-static const struct wl_buffer_listener buffer_listener = {
-	buffer_release
-};
-
-static void
 draw_initial_frame(struct wayland_output *output)
 {
-	struct wayland_compositor *c =
-		(struct wayland_compositor *) output->base.compositor;
-	struct wl_shm *shm = c->parent.shm;
-	struct wl_surface *surface = output->parent.surface;
-	struct wl_shm_pool *pool;
-	struct wl_buffer *buffer;
+	struct wayland_shm_buffer *sb;
 
-	int width, height, stride;
-	int size;
-	int fd;
-	void *data;
+	sb = wayland_output_get_shm_buffer(output);
 
-	if (output->frame) {
-		width = frame_width(output->frame);
-		height = frame_height(output->frame);
-	} else {
-		width = output->mode.width;
-		height = output->mode.height;
-	}
+	/* If we are rendering with GL, then orphan it so that it gets
+	 * destroyed immediately */
+	if (output->gl.egl_window)
+		sb->output = NULL;
 
-	stride = width * 4;
-	size = height * stride;
-
-	fd = os_create_anonymous_file(size);
-	if (fd < 0) {
-		perror("os_create_anonymous_file");
-		return;
-	}
-
-	data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
-		perror("mmap");
-		close(fd);
-		return;
-	}
-
-	pool = wl_shm_create_pool(shm, fd, size);
-
-	buffer = wl_shm_pool_create_buffer(pool, 0,
-					   width, height,
-					   stride,
-					   WL_SHM_FORMAT_ARGB8888);
-	wl_buffer_add_listener(buffer, &buffer_listener, buffer);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-
-	memset(data, 0, size);
-
-	wl_surface_attach(surface, buffer, 0, 0);
+	wl_surface_attach(output->parent.surface, sb->buffer, 0, 0);
 
 	/* We only need to damage some part, as its only transparant
 	 * pixels anyway. */
-	wl_surface_damage(surface, 0, 0, 1, 1);
+	wl_surface_damage(output->parent.surface, 0, 0, 1, 1);
 }
 
 static void
@@ -293,8 +387,8 @@ wayland_output_start_repaint_loop(struct weston_output *output_base)
 }
 
 static void
-wayland_output_repaint(struct weston_output *output_base,
-		       pixman_region32_t *damage)
+wayland_output_repaint_gl(struct weston_output *output_base,
+			  pixman_region32_t *damage)
 {
 	struct wayland_output *output = (struct wayland_output *) output_base;
 	struct weston_compositor *ec = output->base.compositor;
@@ -309,26 +403,158 @@ wayland_output_repaint(struct weston_output *output_base,
 
 	pixman_region32_subtract(&ec->primary_plane.damage,
 				 &ec->primary_plane.damage, damage);
+}
 
+static void
+wayland_output_update_shm_border(struct wayland_shm_buffer *buffer)
+{
+	int32_t ix, iy, iwidth, iheight, fwidth, fheight;
+	cairo_t *cr;
+
+	if (!buffer->output->frame || !buffer->frame_damaged) 
+		return;
+
+	cr = cairo_create(buffer->c_surface);
+
+	frame_interior(buffer->output->frame, &ix, &iy, &iwidth, &iheight);
+	fwidth = frame_width(buffer->output->frame);
+	fheight = frame_height(buffer->output->frame);
+
+	/* Set the clip so we don't unnecisaraly damage the surface */
+	cairo_move_to(cr, ix, iy);
+	cairo_rel_line_to(cr, iwidth, 0);
+	cairo_rel_line_to(cr, 0, iheight);
+	cairo_rel_line_to(cr, -iwidth, 0);
+	cairo_line_to(cr, ix, iy);
+	cairo_line_to(cr, 0, iy);
+	cairo_line_to(cr, 0, fheight);
+	cairo_line_to(cr, fwidth, fheight);
+	cairo_line_to(cr, fwidth, 0);
+	cairo_line_to(cr, 0, 0);
+	cairo_line_to(cr, 0, iy);
+	cairo_close_path(cr);
+	cairo_clip(cr);
+
+	/* Draw using a pattern so that the final result gets clipped */
+	cairo_push_group(cr);
+	frame_repaint(buffer->output->frame, cr);
+	cairo_pop_group_to_source(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_paint(cr);
+
+	cairo_destroy(cr);
+
+	/* Damage the buffer accordingly */
+	pixman_region32_union_rect(&buffer->damage, &buffer->damage,
+				   0, 0, fwidth, iy);
+	pixman_region32_union_rect(&buffer->damage, &buffer->damage,
+				   0, iy, ix, iheight);
+	pixman_region32_union_rect(&buffer->damage, &buffer->damage,
+				   ix + iwidth, iy,
+				   fwidth - (ix + iwidth), iheight);
+	pixman_region32_union_rect(&buffer->damage, &buffer->damage,
+				   0, iy + iheight,
+				   fwidth, fheight - (iy + iheight));
+
+	buffer->frame_damaged = 0;
+}
+
+static void
+wayland_output_repaint_pixman(struct weston_output *output_base,
+			      pixman_region32_t *damage)
+{
+	struct wayland_output *output = (struct wayland_output *) output_base;
+	struct wayland_compositor *c =
+		(struct wayland_compositor *)output->base.compositor;
+	struct wl_callback *callback;
+	struct wayland_shm_buffer *sb;
+	pixman_region32_t buffer_damage;
+	int32_t ix, iy, iwidth, iheight;
+	
+	int i, n;
+	pixman_box32_t *rects;
+
+	if (output->frame) {
+		/* Move damage to buffer space */
+		frame_interior(output->frame, &ix, &iy, &iwidth, &iheight);
+		pixman_region32_translate(damage, ix, iy);
+
+		wl_list_for_each(sb, &output->shm.buffers, link)
+			pixman_region32_union(&sb->damage, &sb->damage, damage);
+
+		if (frame_status(output->frame) & FRAME_STATUS_REPAINT)
+			wl_list_for_each(sb, &output->shm.buffers, link)
+				sb->frame_damaged = 1;
+
+		sb = wayland_output_get_shm_buffer(output);
+	
+		wayland_output_update_shm_border(sb);
+
+		/* Get the amount of buffer damage the renderer cares about */
+		pixman_region32_init(&buffer_damage);
+		pixman_region32_intersect_rect(&buffer_damage, &sb->damage,
+					       ix, iy, iwidth, iheight);
+		pixman_region32_translate(&buffer_damage, -ix, -iy);
+
+		pixman_renderer_output_set_buffer(output_base, sb->pm_image);
+		c->base.renderer->repaint_output(output_base, &buffer_damage);
+
+		pixman_region32_fini(&buffer_damage);
+
+		/* Move the damage back for when we apply it to the plane */
+		pixman_region32_translate(damage, -ix, -iy);
+	} else {
+		wl_list_for_each(sb, &output->shm.buffers, link)
+			pixman_region32_union(&sb->damage, &sb->damage, damage);
+	
+		sb = wayland_output_get_shm_buffer(output);
+		pixman_renderer_output_set_buffer(output_base, sb->pm_image);
+		c->base.renderer->repaint_output(output_base, &sb->damage);
+	}
+
+	callback = wl_surface_frame(output->parent.surface);
+	wl_callback_add_listener(callback, &frame_listener, output);
+	wl_surface_attach(output->parent.surface, sb->buffer, 0, 0);
+
+	rects = pixman_region32_rectangles(&sb->damage, &n);
+	for (i = 0; i < n; ++i)
+		wl_surface_damage(output->parent.surface, rects[i].x1,
+				  rects[i].y1, rects[i].x2 - rects[i].x1,
+				  rects[i].y2 - rects[i].y1);
+
+	wl_surface_commit(output->parent.surface);
+	wl_display_flush(c->parent.wl_display);
+
+	pixman_region32_fini(&sb->damage);
+	pixman_region32_init(&sb->damage);
+
+	pixman_region32_subtract(&c->base.primary_plane.damage,
+				 &c->base.primary_plane.damage, damage);
 }
 
 static void
 wayland_output_destroy(struct weston_output *output_base)
 {
 	struct wayland_output *output = (struct wayland_output *) output_base;
+	struct wayland_compositor *c =
+		(struct wayland_compositor *) output->base.compositor;
 
-	gl_renderer->output_destroy(output_base);
+	if (c->use_pixman) {
+		pixman_renderer_output_destroy(output_base);
+	} else {
+		gl_renderer->output_destroy(output_base);
+	}
 
-	wl_egl_window_destroy(output->parent.egl_window);
+	wl_egl_window_destroy(output->gl.egl_window);
 	wl_surface_destroy(output->parent.surface);
 	wl_shell_surface_destroy(output->parent.shell_surface);
 
 	if (output->frame) {
 		frame_destroy(output->frame);
-		cairo_surface_destroy(output->border.top);
-		cairo_surface_destroy(output->border.left);
-		cairo_surface_destroy(output->border.right);
-		cairo_surface_destroy(output->border.bottom);
+		cairo_surface_destroy(output->gl.border.top);
+		cairo_surface_destroy(output->gl.border.left);
+		cairo_surface_destroy(output->gl.border.right);
+		cairo_surface_destroy(output->gl.border.bottom);
 	}
 
 	weston_output_destroy(&output->base);
@@ -338,6 +564,45 @@ wayland_output_destroy(struct weston_output *output_base)
 }
 
 static const struct wl_shell_surface_listener shell_surface_listener;
+
+static int
+wayland_output_init_gl_renderer(struct wayland_output *output)
+{
+	int32_t fx, fy, fwidth, fheight;
+
+	frame_interior(output->frame, &fx, &fy, NULL, NULL);
+	fwidth = frame_width(output->frame);
+	fheight = frame_height(output->frame);
+
+	output->gl.egl_window =
+		wl_egl_window_create(output->parent.surface,
+				     fwidth, fheight);
+	if (!output->gl.egl_window) {
+		weston_log("failure to create wl_egl_window\n");
+		return -1;
+	}
+
+	if (gl_renderer->output_create(&output->base,
+			output->gl.egl_window) < 0)
+		goto cleanup_window;
+
+	output->base.border.left = fx;
+	output->base.border.top = fy;
+	output->base.border.right = fwidth - output->base.width - fx;
+	output->base.border.bottom = fheight - output->base.height - fy;
+
+	return 0;
+
+cleanup_window:
+	wl_egl_window_destroy(output->gl.egl_window);
+	return -1;
+}
+
+static int
+wayland_output_init_pixman_renderer(struct wayland_output *output)
+{
+	return pixman_renderer_output_create(&output->base);
+}
 
 static int
 wayland_compositor_create_output(struct wayland_compositor *c,
@@ -368,38 +633,30 @@ wayland_compositor_create_output(struct wayland_compositor *c,
 
 	weston_output_move(&output->base, 0, 0);
 
+	wl_list_init(&output->shm.buffers);
+	wl_list_init(&output->shm.free_buffers);
+
 	if (!c->theme)
 		c->theme = theme_create();
 	output->frame = frame_create(c->theme, width, height,
 				     FRAME_BUTTON_CLOSE, "Weston");
 	frame_resize_inside(output->frame, width, height);
-	frame_interior(output->frame, &fx, &fy, NULL, NULL);
-	fwidth = frame_width(output->frame);
-	fheight = frame_height(output->frame);
 
-	weston_log("Creating %dx%d wayland output (%dx%d actual)\n",
-		   width, height, fwidth, fheight);
+	weston_log("Creating %dx%d wayland output\n", width, height);
 
 	output->parent.surface =
 		wl_compositor_create_surface(c->parent.compositor);
 	wl_surface_set_user_data(output->parent.surface, output);
 
-	output->parent.egl_window =
-		wl_egl_window_create(output->parent.surface,
-				     fwidth, fheight);
-	if (!output->parent.egl_window) {
-		weston_log("failure to create wl_egl_window\n");
-		goto cleanup_output;
+	if (c->use_pixman) {
+		if (wayland_output_init_pixman_renderer(output) < 0)
+			goto cleanup_output;
+		output->base.repaint = wayland_output_repaint_pixman;
+	} else {
+		if (wayland_output_init_gl_renderer(output) < 0)
+			goto cleanup_output;
+		output->base.repaint = wayland_output_repaint_gl;
 	}
-
-	if (gl_renderer->output_create(&output->base,
-			output->parent.egl_window) < 0)
-		goto cleanup_window;
-
-	output->base.border.left = fx;
-	output->base.border.top = fy;
-	output->base.border.right = fwidth - width - fx;
-	output->base.border.bottom = fheight - height - fy;
 
 	frame_input_rect(output->frame, &fx, &fy, &fwidth, &fheight);
 	region = wl_compositor_create_region(c->parent.compositor);
@@ -422,7 +679,6 @@ wayland_compositor_create_output(struct wayland_compositor *c,
 	wl_shell_surface_set_toplevel(output->parent.shell_surface);
 
 	output->base.start_repaint_loop = wayland_output_start_repaint_loop;
-	output->base.repaint = wayland_output_repaint;
 	output->base.destroy = wayland_output_destroy;
 	output->base.assign_planes = NULL;
 	output->base.set_backlight = NULL;
@@ -433,8 +689,6 @@ wayland_compositor_create_output(struct wayland_compositor *c,
 
 	return 0;
 
-cleanup_window:
-	wl_egl_window_destroy(output->parent.egl_window);
 cleanup_output:
 	/* FIXME: cleanup weston_output */
 	free(output);
@@ -959,7 +1213,7 @@ wayland_destroy(struct weston_compositor *ec)
 static void create_cursor(struct wayland_compositor *c);
 
 static struct weston_compositor *
-wayland_compositor_create(struct wl_display *display,
+wayland_compositor_create(struct wl_display *display, int use_pixman,
 			  int width, int height, const char *display_name,
 			  int *argc, char *argv[],
 			  struct weston_config *config)
@@ -997,10 +1251,23 @@ wayland_compositor_create(struct wl_display *display,
 	if (!gl_renderer)
 		goto err_display;
 
-	if (gl_renderer->create(&c->base, c->parent.wl_display,
-			gl_renderer->alpha_attribs,
-			NULL) < 0)
-		goto err_display;
+	c->use_pixman = use_pixman;
+	if (!use_pixman) {
+		if (gl_renderer->create(&c->base, c->parent.wl_display,
+				gl_renderer->alpha_attribs,
+				NULL) < 0) {
+			weston_log("Failed to initialize the GL renderer; "
+				   "falling back to pixman.\n");
+			c->use_pixman = 1;
+		}
+	}
+
+	if (c->use_pixman) {
+		if (pixman_renderer_init(&c->base) < 0) {
+			weston_log("Failed to initialize pixman renderer\n");
+			goto err_display;
+		}
+	}
 
 	c->base.destroy = wayland_destroy;
 	c->base.restore = wayland_restore;
@@ -1073,16 +1340,18 @@ backend_init(struct wl_display *display, int *argc, char *argv[],
 {
 	int width = 1024, height = 640;
 	char *display_name = NULL;
+	int use_pixman = 0;
 
 	const struct weston_option wayland_options[] = {
 		{ WESTON_OPTION_INTEGER, "width", 0, &width },
 		{ WESTON_OPTION_INTEGER, "height", 0, &height },
 		{ WESTON_OPTION_STRING, "display", 0, &display_name },
+		{ WESTON_OPTION_BOOLEAN, "use-pixman", 0, &use_pixman },
 	};
 
 	parse_options(wayland_options,
 		      ARRAY_LENGTH(wayland_options), argc, argv);
 
-	return wayland_compositor_create(display, width, height, display_name,
-					 argc, argv, config);
+	return wayland_compositor_create(display, use_pixman, width, height,
+					 display_name, argc, argv, config);
 }
