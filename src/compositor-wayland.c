@@ -64,6 +64,7 @@ struct wayland_compositor {
 	} parent;
 
 	int use_pixman;
+	int sprawl_across_outputs;
 
 	struct theme *theme;
 	cairo_device_t *frame_device;
@@ -1712,7 +1713,7 @@ wayland_compositor_register_output(struct wayland_compositor *c, uint32_t id)
 	wl_list_init(&output->mode_list);
 	wl_list_insert(&c->parent.output_list, &output->link);
 
-	if (c->parent.fshell) {
+	if (c->sprawl_across_outputs) {
 		wl_display_roundtrip(c->parent.wl_display);
 		wayland_output_create_for_parent_output(c, output);
 	}
@@ -1993,7 +1994,7 @@ backend_init(struct wl_display *display, int *argc, char *argv[],
 	struct wayland_output *output;
 	struct wayland_parent_output *poutput;
 	struct weston_config_section *section;
-	int x, count, width, height, scale, use_pixman, fullscreen;
+	int x, count, width, height, scale, use_pixman, fullscreen, sprawl;
 	const char *section_name, *display_name;
 	char *name;
 
@@ -2005,6 +2006,7 @@ backend_init(struct wl_display *display, int *argc, char *argv[],
 		{ WESTON_OPTION_BOOLEAN, "use-pixman", 0, &use_pixman },
 		{ WESTON_OPTION_INTEGER, "output-count", 0, &count },
 		{ WESTON_OPTION_BOOLEAN, "fullscreen", 0, &fullscreen },
+		{ WESTON_OPTION_BOOLEAN, "sprawl", 0, &sprawl },
 	};
 
 	width = 0;
@@ -2014,6 +2016,7 @@ backend_init(struct wl_display *display, int *argc, char *argv[],
 	use_pixman = 0;
 	count = 1;
 	fullscreen = 0;
+	sprawl = 0;
 	parse_options(wayland_options,
 		      ARRAY_LENGTH(wayland_options), argc, argv);
 
@@ -2022,7 +2025,8 @@ backend_init(struct wl_display *display, int *argc, char *argv[],
 	if (!c)
 		return NULL;
 	
-	if (c->parent.fshell) {
+	if (sprawl || c->parent.fshell) {
+		c->sprawl_across_outputs = 1;
 		wl_display_roundtrip(c->parent.wl_display);
 
 		wl_list_for_each(poutput, &c->parent.output_list, link)
