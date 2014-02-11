@@ -32,11 +32,14 @@
 #include <linux/input.h>
 #include <wayland-client.h>
 #include "window.h"
+#include "fullscreen-shell-client-protocol.h"
 
 struct fullscreen {
 	struct display *display;
 	struct window *window;
 	struct widget *widget;
+	struct wl_fullscreen_shell *fshell;
+	enum wl_fullscreen_shell_present_method present_method;
 	int width, height;
 	int fullscreen;
 	float pointer_x, pointer_y;
@@ -113,6 +116,7 @@ redraw_handler(struct widget *widget, void *data)
 	cairo_t *cr;
 	int i;
 	double x, y, border;
+	const char *method_name[] = { "default", "center", "zoom", "zoom_crop", "stretch", "driver" };
 
 	surface = window_get_surface(fullscreen->window);
 	if (surface == NULL ||
@@ -138,17 +142,31 @@ redraw_handler(struct widget *widget, void *data)
 		      allocation.y + 25);
 	cairo_set_source_rgb(cr, 1, 1, 1);
 
-	draw_string(cr,
-		    "Surface size: %d, %d\n"
-		    "Scale: %d, transform: %d\n"
-		    "Pointer: %f,%f\n"
-		    "Fullscreen: %d\n"
-		    "Keys: (s)cale, (t)ransform, si(z)e, (f)ullscreen, (q)uit\n",
-		    fullscreen->width, fullscreen->height,
-		    window_get_buffer_scale (fullscreen->window),
-		    window_get_buffer_transform (fullscreen->window),
-		    fullscreen->pointer_x, fullscreen->pointer_y,
-		    fullscreen->fullscreen);
+	if (fullscreen->fshell) {
+		draw_string(cr,
+			    "Surface size: %d, %d\n"
+			    "Scale: %d, transform: %d\n"
+			    "Pointer: %f,%f\n"
+			    "Present method: %s\n"
+			    "Keys: (s)cale, (t)ransform, si(z)e, (m)ethod, (q)uit\n",
+			    fullscreen->width, fullscreen->height,
+			    window_get_buffer_scale (fullscreen->window),
+			    window_get_buffer_transform (fullscreen->window),
+			    fullscreen->pointer_x, fullscreen->pointer_y,
+			    method_name[fullscreen->present_method]);
+	} else {
+		draw_string(cr,
+			    "Surface size: %d, %d\n"
+			    "Scale: %d, transform: %d\n"
+			    "Pointer: %f,%f\n"
+			    "Fullscreen: %d\n"
+			    "Keys: (s)cale, (t)ransform, si(z)e, (f)ullscreen, (q)uit\n",
+			    fullscreen->width, fullscreen->height,
+			    window_get_buffer_scale (fullscreen->window),
+			    window_get_buffer_transform (fullscreen->window),
+			    fullscreen->pointer_x, fullscreen->pointer_y,
+			    fullscreen->fullscreen);
+	}
 
 	y = 100;
 	i = 0;
@@ -220,7 +238,21 @@ key_handler(struct window *window, struct input *input, uint32_t time,
 				       fullscreen->width, fullscreen->height);
 		break;
 
+	case XKB_KEY_m:
+		if (!fullscreen->fshell)
+			break;
+
+		fullscreen->present_method = (fullscreen->present_method + 1) % 6;
+		wl_fullscreen_shell_present_surface(fullscreen->fshell,
+						    window_get_wl_surface(fullscreen->window),
+						    fullscreen->present_method,
+						    0, NULL);
+		window_schedule_redraw(window);
+
+		break;
 	case XKB_KEY_f:
+		if (fullscreen->fshell)
+			break;
 		fullscreen->fullscreen ^= 1;
 		window_set_fullscreen(window, fullscreen->fullscreen);
 		break;
@@ -288,6 +320,19 @@ usage(int error_code)
 	exit(error_code);
 }
 
+static void
+global_handler(struct display *display, uint32_t id, const char *interface,
+	       uint32_t version, void *data)
+{
+	struct fullscreen *fullscreen = data;
+
+	if (strcmp(interface, "wl_fullscreen_shell") == 0) {
+		fullscreen->fshell = display_bind(display, id,
+						  &wl_fullscreen_shell_interface,
+						  1);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	struct fullscreen fullscreen;
@@ -297,6 +342,7 @@ int main(int argc, char *argv[])
 	fullscreen.width = 640;
 	fullscreen.height = 480;
 	fullscreen.fullscreen = 0;
+	fullscreen.present_method = WL_FULLSCREEN_SHELL_PRESENT_METHOD_DEFAULT;
 
 	for (i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-w") == 0) {
@@ -322,7 +368,21 @@ int main(int argc, char *argv[])
 	}
 
 	fullscreen.display = d;
-	fullscreen.window = window_create(d);
+	fullscreen.fshell = NULL;
+	display_set_user_data(fullscreen.display, &fullscreen);
+	display_set_global_handler(fullscreen.display, global_handler);
+
+	if (fullscreen.fshell) {
+		fullscreen.window = window_create_custom(d);
+		wl_fullscreen_shell_present_surface(fullscreen.fshell,
+						    window_get_wl_surface(fullscreen.window),
+						    fullscreen.present_method,
+						    0, NULL);
+
+	} else {
+		fullscreen.window = window_create(d);
+	}
+
 	fullscreen.widget =
 		window_add_widget(fullscreen.window, &fullscreen);
 
