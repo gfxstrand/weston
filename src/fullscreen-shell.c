@@ -155,7 +155,7 @@ create_black_surface(struct weston_compositor *ec, struct fs_output *fsout,
 
 	surface->configure = black_surface_configure;
 	surface->configure_private = fsout;
-	weston_surface_set_color(surface, 0.0f, 0.0f, 0.0f, 1.0f);
+	weston_surface_set_color(surface, 0.3f, 0.2f, 0.4f, 1.0f);
 	pixman_region32_fini(&surface->opaque);
 	pixman_region32_init_rect(&surface->opaque, 0, 0, w, h);
 	pixman_region32_fini(&surface->input);
@@ -223,6 +223,7 @@ fs_output_create(struct fullscreen_shell *shell, struct weston_output *output)
 						 output->width, output->height);
 	wl_list_insert(&shell->layer.view_list,
 		       &fsout->black_view->layer_link);
+	wl_list_init(&fsout->transform.link);
 	return fsout;
 }
 
@@ -351,6 +352,9 @@ configure_output(struct fs_output *fsout)
 
 	if (fsout->method != WL_FULLSCREEN_SHELL_PRESENT_METHOD_DRIVER)
 		restore_output_mode(fsout->output);
+
+	wl_list_remove(&fsout->transform.link);
+	wl_list_init(&fsout->transform.link);
 
 	switch (fsout->method) {
 	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_DEFAULT:
