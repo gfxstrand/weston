@@ -116,7 +116,7 @@ redraw_handler(struct widget *widget, void *data)
 	cairo_t *cr;
 	int i;
 	double x, y, border;
-	const char *method_name[] = { "default", "scale", "driver", "fill" };
+	const char *method_name[] = { "default", "center", "zoom", "zoom_crop", "stretch", "driver" };
 
 	surface = window_get_surface(fullscreen->window);
 	if (surface == NULL ||
@@ -242,7 +242,7 @@ key_handler(struct window *window, struct input *input, uint32_t time,
 		if (!fullscreen->fshell)
 			break;
 
-		fullscreen->present_method = (fullscreen->present_method + 1) % 4;
+		fullscreen->present_method = (fullscreen->present_method + 1) % 6;
 		wl_fullscreen_shell_present_surface(fullscreen->fshell,
 						    window_get_wl_surface(fullscreen->window),
 						    fullscreen->present_method,

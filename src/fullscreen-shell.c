@@ -303,9 +303,9 @@ fs_output_center_view(struct fs_output *fsout)
 }
 
 static void
-fs_output_scale_view(struct fs_output *fsout)
+fs_output_scale_view(struct fs_output *fsout, float width, float height)
 {
-	float scale, output_aspect, surface_aspect, x, y;
+	float x, y;
 	int32_t surf_x, surf_y, surf_width, surf_height;
 	struct weston_matrix *matrix;
 	struct weston_view *view = fsout->view;
@@ -322,21 +322,14 @@ fs_output_scale_view(struct fs_output *fsout)
 		matrix = &fsout->transform.matrix;
 		weston_matrix_init(matrix);
 
-		output_aspect = (float) output->width / (float) output->height;
-		surface_aspect = (float) surf_width / (float) surf_height;
-
-		if (output_aspect < surface_aspect)
-			scale = (float) output->width / (float) surf_width;
-		else
-			scale = (float) output->height / (float) surf_height;
-
-		weston_matrix_scale(matrix, scale, scale, 1);
+		weston_matrix_scale(matrix, width / surf_width,
+				    height / surf_height, 1);
 		wl_list_remove(&fsout->transform.link);
 		wl_list_insert(&fsout->view->geometry.transformation_list,
 			       &fsout->transform.link);
 
-		x = output->x + (output->width - surf_width * scale) / 2 - surf_x;
-		y = output->y + (output->height - surf_height * scale) / 2 - surf_y;
+		x = output->x + (output->width - width) / 2 - surf_x;
+		y = output->y + (output->height - height) / 2 - surf_y;
 
 		weston_view_set_position(view, x, y);
 	}
@@ -345,6 +338,8 @@ fs_output_scale_view(struct fs_output *fsout)
 static void
 configure_output(struct fs_output *fsout)
 {
+	struct weston_output *output = fsout->output;
+	float output_aspect, surface_aspect;
 	int32_t surf_x, surf_y, surf_width, surf_height;
 	struct weston_mode mode;
 
@@ -356,20 +351,46 @@ configure_output(struct fs_output *fsout)
 	wl_list_remove(&fsout->transform.link);
 	wl_list_init(&fsout->transform.link);
 
+	surface_subsurfaces_boundingbox(fsout->view->surface,
+					&surf_x, &surf_y,
+					&surf_width, &surf_height);
+
+	output_aspect = (float) output->width / (float) output->height;
+	surface_aspect = (float) surf_width / (float) surf_height;
+
 	switch (fsout->method) {
 	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_DEFAULT:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_CENTER:
 		fs_output_center_view(fsout);
 		break;
 
-	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_SCALE:
-		fs_output_scale_view(fsout);
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_ZOOM:
+		if (output_aspect < surface_aspect)
+			fs_output_scale_view(fsout,
+					     output->width,
+					     output->width / surface_aspect);
+		else
+			fs_output_scale_view(fsout,
+					     output->height * surface_aspect,
+					     output->height);
+		break;
+
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_ZOOM_CROP:
+		if (output_aspect < surface_aspect)
+			fs_output_scale_view(fsout,
+					     output->height * surface_aspect,
+					     output->height);
+		else
+			fs_output_scale_view(fsout,
+					     output->width,
+					     output->width / surface_aspect);
+		break;
+
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_STRETCH:
+		fs_output_scale_view(fsout, output->width, output->height);
 		break;
 
 	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_DRIVER:
-		surface_subsurfaces_boundingbox(fsout->view->surface,
-						&surf_x, &surf_y,
-						&surf_width, &surf_height);
-
 		mode.flags = 0;
 		mode.width = surf_width * fsout->view->surface->buffer_viewport.scale;
 		mode.height = surf_height * fsout->view->surface->buffer_viewport.scale;
@@ -386,10 +407,6 @@ configure_output(struct fs_output *fsout)
 			restore_output_mode(fsout->output);
 			fs_output_center_view(fsout);
 		}
-		break;
-
-	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_FILL:
-		fs_output_center_view(fsout);
 		break;
 
 	default:
@@ -478,6 +495,20 @@ fullscreen_shell_present_surface(struct wl_client *client,
 	struct fs_output *fsout;
 
 	surface = surface_res ? wl_resource_get_user_data(surface_res) : NULL;
+
+	switch(method) {
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_DEFAULT:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_CENTER:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_ZOOM:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_ZOOM_CROP:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_STRETCH:
+	case WL_FULLSCREEN_SHELL_PRESENT_METHOD_DRIVER:
+		break;
+	default:
+		wl_resource_post_error(resource,
+				       WL_FULLSCREEN_SHELL_ERROR_INVALID_METHOD,
+				       "Invalid presentation method");
+	}
 
 	if (output_res) {
 		output = wl_resource_get_user_data(output_res);

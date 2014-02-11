@@ -13,9 +13,11 @@
 	output. The compositor is free to ignore this parameter.
       </description>
       <entry name="default" value="0" summary="no preference, apply default policy"/>
-      <entry name="scale" value="1" summary="scale, preserve the surface's aspect ratio and center on output"/>
-      <entry name="driver" value="2" summary="switch output mode to the smallest mode that can fit the surface, add black borders to compensate size mismatch"/>
-      <entry name="fill" value="3" summary="no upscaling, center on output and add black borders to compensate size mismatch"/>
+      <entry name="center" value="1" summary="center the surface on the output"/>
+      <entry name="zoom" value="2" summary="scale the surface, preserving aspect ratio, to the largest size that will fit on the output" />
+      <entry name="zoom_crop" value="3" summary="scale the surface, preserving aspect ratio, to fully fill the output cropping if needed" />
+      <entry name="stretch" value="4" summary="scale the surface to the size of the output ignoring aspect raito" />
+      <entry name="driver" value="5" summary="attempt to switch the output mode to match the surface size"/>
     </enum>
 
     <request name="present_surface">
@@ -57,5 +59,12 @@
       <arg name="framerate" type="uint"/>
       <arg name="output" type="object" interface="wl_output" allow-null="true"/>
     </request>
+
+    <enum name="error">
+      <description summary="wl_fullscreen_shell error values">
+	These errors can be emitted in response to wl_fullscreen_shell requests
+      </description>
+      <entry name="invalid_method" value="0" summary="present_method is not known"/>
+    </enum>
   </interface>
 </protocol>
