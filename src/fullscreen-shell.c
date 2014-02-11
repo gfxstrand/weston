@@ -38,7 +38,7 @@ struct fullscreen_shell {
 	struct weston_compositor *compositor;
 
 	struct weston_layer layer;
-	struct wl_list outputs;
+	struct wl_list output_list;
 	struct wl_listener output_created_listener;
 
 	struct wl_listener seat_created_listener;
@@ -62,6 +62,7 @@ struct fs_output {
 };
 
 struct pointer_focus_listener {
+	struct fullscreen_shell *shell;
 	struct wl_listener pointer_focus;
 	struct wl_listener seat_caps;
 	struct wl_listener seat_destroyed;
@@ -72,7 +73,7 @@ pointer_focus_changed(struct wl_listener *listener, void *data)
 {
 	struct weston_pointer *pointer = data;
 
-	if (pointer->focus)
+	if (pointer->focus && pointer->focus->surface->resource)
 		weston_surface_activate(pointer->focus->surface, pointer->seat);
 }
 
@@ -81,6 +82,7 @@ seat_caps_changed(struct wl_listener *l, void *data)
 {
 	struct weston_seat *seat = data;
 	struct pointer_focus_listener *listener;
+	struct fs_output *fsout;
 
 	listener = container_of(l, struct pointer_focus_listener, seat_caps);
 
@@ -93,6 +95,15 @@ seat_caps_changed(struct wl_listener *l, void *data)
 	} else {
 		if (listener->pointer_focus.link.prev) {
 			wl_list_remove(&listener->pointer_focus.link);
+		}
+	}
+
+	if (seat->keyboard && seat->keyboard->focus != NULL) {
+		wl_list_for_each(fsout, &listener->shell->output_list, link) {
+			if (fsout->surface) {
+				weston_surface_activate(fsout->surface, seat);
+				return;
+			}
 		}
 	}
 }
@@ -119,6 +130,8 @@ seat_created(struct wl_listener *l, void *data)
 		return;
 	memset(listener, 0, sizeof *listener);
 
+	listener->shell = container_of(l, struct fullscreen_shell,
+				       seat_created_listener);
 	listener->pointer_focus.notify = pointer_focus_changed;
 	listener->seat_caps.notify = seat_caps_changed;
 	listener->seat_destroyed.notify = seat_destroyed;
@@ -211,7 +224,7 @@ fs_output_create(struct fullscreen_shell *shell, struct weston_output *output)
 	memset(fsout, 0, sizeof *fsout);
 
 	fsout->shell = shell;
-	wl_list_insert(&shell->outputs, &fsout->link);
+	wl_list_insert(&shell->output_list, &fsout->link);
 
 	fsout->output = output;
 	fsout->output_destroyed.notify = output_destroyed;
@@ -433,7 +446,7 @@ configure_presented_surface(struct weston_surface *surface, int32_t sx,
 	if (surface->configure != configure_presented_surface)
 		return;
 
-	wl_list_for_each(fsout, &shell->outputs, link)
+	wl_list_for_each(fsout, &shell->output_list, link)
 		if (fsout->view && fsout->view->surface == surface)
 			configure_output(fsout);
 }
@@ -492,6 +505,7 @@ fullscreen_shell_present_surface(struct wl_client *client,
 		wl_resource_get_user_data(resource);
 	struct weston_output *output;
 	struct weston_surface *surface;
+	struct weston_seat *seat;
 	struct fs_output *fsout;
 
 	surface = surface_res ? wl_resource_get_user_data(surface_res) : NULL;
@@ -515,8 +529,15 @@ fullscreen_shell_present_surface(struct wl_client *client,
 		fsout = fs_output_for_output(output);
 		fs_output_set_surface(fsout, surface, method, framerate);
 	} else {
-		wl_list_for_each(fsout, &shell->outputs, link)
+		wl_list_for_each(fsout, &shell->output_list, link)
 			fs_output_set_surface(fsout, surface, method, framerate);
+	}
+
+	if (surface) {
+		wl_list_for_each(seat, &shell->compositor->seat_list, link) {
+			if (seat->keyboard && seat->keyboard->focus == NULL)
+				weston_surface_activate(surface, seat);
+		}
 	}
 }
 
@@ -584,7 +605,7 @@ module_init(struct weston_compositor *compositor,
 
 	weston_layer_init(&shell->layer, &compositor->cursor_layer.link);
 
-	wl_list_init(&shell->outputs);
+	wl_list_init(&shell->output_list);
 	shell->output_created_listener.notify = output_created;
 	wl_signal_add(&compositor->output_created_signal,
 		      &shell->output_created_listener);
