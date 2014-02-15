@@ -349,6 +349,8 @@ struct output {
 	struct wl_list link;
 	int transform;
 	int scale;
+	char *make;
+	char *model;
 
 	display_output_handler_t destroy_handler;
 	void *user_data;
@@ -4676,6 +4678,14 @@ display_handle_geometry(void *data,
 	output->allocation.x = x;
 	output->allocation.y = y;
 	output->transform = transform;
+
+	if (output->make)
+		free(output->make);
+	output->make = strdup(make);
+
+	if (output->model)
+		free(output->model);
+	output->model = strdup(model);
 }
 
 static void
@@ -4861,6 +4871,18 @@ uint32_t
 output_get_scale(struct output *output)
 {
 	return output->scale;
+}
+
+const char *
+output_get_make(struct output *output)
+{
+	return output->make;
+}
+
+const char *
+output_get_model(struct output *output)
+{
+	return output->model;
 }
 
 static void
