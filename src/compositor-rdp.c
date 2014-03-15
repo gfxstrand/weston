@@ -1033,6 +1033,8 @@ rdp_compositor_create(struct wl_display *display,
 	if (rdp_compositor_create_output(c, config->width, config->height, config->extra_modes) < 0)
 		goto err_compositor;
 
+	c->base.capabilities |= WESTON_CAP_ARBITRARY_MODES;
+
 	if(!config->env_socket) {
 		c->listener = freerdp_listener_new();
 		c->listener->PeerAccepted = rdp_incoming_peer;
