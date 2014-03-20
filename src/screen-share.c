@@ -1036,7 +1036,6 @@ share_output_binding(struct weston_seat *seat, uint32_t time, uint32_t key,
 {
 	struct weston_output *output;
 	const char *path = BINDIR "/weston";
-	char width_arg[32], height_arg[32];
 
 	if (!seat->pointer) {
 		weston_log("Cannot pick output: Seat does not have pointer\n");
@@ -1051,21 +1050,10 @@ share_output_binding(struct weston_seat *seat, uint32_t time, uint32_t key,
 		return;
 	}
 
-	/* We need to explicitly pass the width and height of the output to the
-	 * RDP backend.  This is because the RDP backend does not currently
-	 * handle mode-switching well.  Should this change in the future, these
-	 * paramters can and should be removed.
-	 */
-
-	snprintf(width_arg, sizeof width_arg, "--width=%d", output->width);
-	snprintf(height_arg, sizeof height_arg, "--height=%d", output->height);
-
 	char *const argv[] = {
 		"weston",
 		"--backend=rdp-backend.so",
 		"--shell=fullscreen-shell.so",
-		width_arg,
-		height_arg,
 		NULL
 	};
 
