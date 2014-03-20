@@ -552,6 +552,7 @@ int main(int argc, char *argv[])
 		fullscreen.draw_cursor = 1;
 	} else {
 		fullscreen.window = window_create(d);
+		fullscreen.draw_cursor = 0;
 	}
 
 	fullscreen.widget =
