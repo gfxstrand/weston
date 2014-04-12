@@ -560,11 +560,22 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 		  bwidth - 2 * bborder, bheight - 2 * bborder, 0x80000000);
 	
 	/* Damage where the ball was */
-	wl_surface_damage(window->surface,
-			  window->ball.x - window->ball.radius,
-			  window->ball.y - window->ball.radius,
-			  window->ball.radius * 2 + 1,
-			  window->ball.radius * 2 + 1);
+	if (wl_surface_get_version(window->surface) < 4) {
+		/* Damage in surface coordinates */
+		wl_surface_damage(window->surface,
+				  window->ball.x - window->ball.radius,
+				  window->ball.y - window->ball.radius,
+				  window->ball.radius * 2 + 1,
+				  window->ball.radius * 2 + 1);
+	} else {
+		/* Damage in buffer coordinates */
+		window_get_transformed_ball(window, &bx, &by);
+		wl_surface_damage(window->surface,
+				  bx - window->ball.radius * window->scale,
+				  by - window->ball.radius * window->scale,
+				  window->ball.radius * window->scale * 2 + 1,
+				  window->ball.radius * window->scale * 2 + 1);
+	}
 
 	window_advance_game(window, time);
 
@@ -589,11 +600,21 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 	}
 
 	/* Damage where the ball is now */
-	wl_surface_damage(window->surface,
-			  window->ball.x - window->ball.radius,
-			  window->ball.y - window->ball.radius,
-			  window->ball.radius * 2 + 1,
-			  window->ball.radius * 2 + 1);
+	if (wl_surface_get_version(window->surface) < 4) {
+		/* Damage in surface coordinates */
+		wl_surface_damage(window->surface,
+				  window->ball.x - window->ball.radius,
+				  window->ball.y - window->ball.radius,
+				  window->ball.radius * 2 + 1,
+				  window->ball.radius * 2 + 1);
+	} else {
+		/* Damage in buffer coordinates */
+		wl_surface_damage(window->surface,
+				  bx - window->ball.radius * window->scale,
+				  by - window->ball.radius * window->scale,
+				  window->ball.radius * window->scale * 2 + 1,
+				  window->ball.radius * window->scale * 2 + 1);
+	}
 
 	wl_surface_attach(window->surface, buffer->buffer, 0, 0);
 
@@ -669,6 +690,10 @@ registry_handle_global(void *data, struct wl_registry *registry,
 
 		if (d->target_version > 0)
 			version = d->target_version;
+
+		/* Maximum version of 4 */
+		if (version > 4)
+			version = 4;
 
 		d->compositor =
 			wl_registry_bind(registry,
@@ -829,7 +854,7 @@ main(int argc, char **argv)
 		    strcmp(argv[i], "-h") == 0) {
 			print_usage(0);
 		} else if (sscanf(argv[i], "--version=%d", &version) > 0) {
-			if (version < 1 || version > 3) {
+			if (version < 1 || version > 4) {
 				fprintf(stderr, "Unsupported wl_surface version: %d\n",
 					version);
 				return 1;
