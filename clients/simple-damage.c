@@ -498,30 +498,42 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 
 		switch (window->transform) {
 		case WL_OUTPUT_TRANSFORM_NORMAL:
-		case WL_OUTPUT_TRANSFORM_FLIPPED_270:
-			buffer_data += (bheight / 3) * bstride +
+			buffer_data += (bheight / 4) * bstride +
 				       (bwidth / 3);
 			break;
 		case WL_OUTPUT_TRANSFORM_90:
-		case WL_OUTPUT_TRANSFORM_FLIPPED:
 			buffer_data += (bheight / 3) * bstride +
-				       (bwidth - bwidth / 3);
+				       (bwidth - bwidth / 4);
 			break;
 		case WL_OUTPUT_TRANSFORM_180:
-		case WL_OUTPUT_TRANSFORM_FLIPPED_90:
-			buffer_data += (bheight - bheight / 3) * bstride +
+			buffer_data += (bheight - bheight / 4) * bstride +
 				       (bwidth - bwidth / 3);
 			break;
 		case WL_OUTPUT_TRANSFORM_270:
-		case WL_OUTPUT_TRANSFORM_FLIPPED_180:
 			buffer_data += (bheight - bheight / 3) * bstride +
+				       (bwidth / 4);
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED:
+			buffer_data += (bheight / 4) * bstride +
+				       (bwidth - bwidth / 3);
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+			buffer_data += (bheight - bheight / 3) * bstride +
+				       (bwidth - bwidth / 4);
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+			buffer_data += (bheight - bheight / 4) * bstride +
 				       (bwidth / 3);
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+			buffer_data += (bheight / 3) * bstride +
+				       (bwidth / 4);
 			break;
 		}
 
 		wl_viewport_set_source(window->viewport,
 				       wl_fixed_from_int(window->width * window->scale / 3),
-				       wl_fixed_from_int(window->height * window->scale / 3),
+				       wl_fixed_from_int(window->height * window->scale / 4),
 				       wl_fixed_from_int(window->width * window->scale),
 				       wl_fixed_from_int(window->height * window->scale));
 
