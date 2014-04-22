@@ -804,7 +804,7 @@ print_usage(int retval)
 		"  --height=HEIGHT\tHeight of the window\n"
 		"  --scale=SCALE\t\tScale factor for the surface\n"
 		"  --transform=TRANSFORM\tTransform for the surface\n"
-		"  --viewport\t\tUse wl_viewport\n"
+		"  --use-viewport\tUse wl_viewport\n"
 	);
 
 	exit(retval);
