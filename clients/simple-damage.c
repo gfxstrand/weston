@@ -60,6 +60,11 @@ struct buffer {
 	int busy;
 };
 
+enum window_flags {
+	WINDOW_FLAG_USE_VIEWPORT = 0x1,
+	WINDOW_FLAG_ROTATING_TRANSFORM = 0x2,
+};
+
 struct window {
 	struct display *display;
 	int width, height, border;
@@ -70,6 +75,7 @@ struct window {
 	struct buffer buffers[2];
 	struct buffer *prev_buffer;
 
+	enum window_flags flags;
 	int scale;
 	enum wl_output_transform transform;
 
@@ -246,12 +252,14 @@ window_advance_game(struct window *window, uint32_t timestamp)
 
 static struct window *
 create_window(struct display *display, int width, int height,
-	      enum wl_output_transform transform, int scale, int use_viewport)
+	      enum wl_output_transform transform, int scale,
+	      enum window_flags flags)
 {
 	struct window *window;
 
 	if (wl_compositor_get_version(display->compositor) < 2 &&
-	    transform != WL_OUTPUT_TRANSFORM_NORMAL) {
+	    (transform != WL_OUTPUT_TRANSFORM_NORMAL ||
+	     flags & WINDOW_FLAG_ROTATING_TRANSFORM)) {
 		fprintf(stderr, "wl_surface.buffer_transform unsupported in "
 				"wl_surface version %d\n",
 			wl_compositor_get_version(display->compositor));
@@ -259,14 +267,14 @@ create_window(struct display *display, int width, int height,
 	}
 	
 	if (wl_compositor_get_version(display->compositor) < 3 &&
-	    (! use_viewport) && scale != 1) {
+	    (! (flags & WINDOW_FLAG_USE_VIEWPORT)) && scale != 1) {
 		fprintf(stderr, "wl_surface.buffer_scale unsupported in "
 				"wl_surface version %d\n",
 			wl_compositor_get_version(display->compositor));
 		exit(1);
 	}
 
-	if (display->scaler == NULL && use_viewport) {
+	if (display->scaler == NULL && (flags & WINDOW_FLAG_USE_VIEWPORT)) {
 		fprintf(stderr, "Compositor does not support wl_viewport");
 		exit(1);
 	}
@@ -280,6 +288,7 @@ create_window(struct display *display, int width, int height,
 	window->width = width;
 	window->height = height;
 	window->border = 10;
+	window->flags = flags;
 	window->transform = transform;
 	window->scale = scale;
 
@@ -287,7 +296,7 @@ create_window(struct display *display, int width, int height,
 
 	window->surface = wl_compositor_create_surface(display->compositor);
 
-	if (use_viewport)
+	if (window->flags & WINDOW_FLAG_USE_VIEWPORT)
 		window->viewport = wl_scaler_get_viewport(display->scaler,
 							  window->surface);
 
@@ -472,6 +481,11 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 			"Both buffers busy at redraw(). Server bug?\n");
 		abort();
 	}
+
+	/* Rotate the damage, but keep the even/odd parity so the
+	 * dimensions of the buffers don't change */
+	if (window->flags & WINDOW_FLAG_ROTATING_TRANSFORM)
+		window->transform = (window->transform + 2) % 8;
 
 	switch (window->transform) {
 	case WL_OUTPUT_TRANSFORM_NORMAL:
@@ -804,6 +818,7 @@ print_usage(int retval)
 		"  --height=HEIGHT\tHeight of the window\n"
 		"  --scale=SCALE\t\tScale factor for the surface\n"
 		"  --transform=TRANSFORM\tTransform for the surface\n"
+		"  --rotating-transform\tUse a different buffer_transform for each frame\n"
 		"  --use-viewport\tUse wl_viewport\n"
 	);
 
@@ -846,8 +861,9 @@ main(int argc, char **argv)
 	struct window *window;
 	int i, ret = 0;
 	int version = 0;
-	int width = 300, height = 200, scale = 1, use_viewport = 0;
+	int width = 300, height = 200, scale = 1;
 	enum wl_output_transform transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	enum window_flags flags = 0;
 
 	for (i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 ||
@@ -870,10 +886,13 @@ main(int argc, char **argv)
 		} else if (strncmp(argv[i], "--transform=", 12) == 0 &&
 			   parse_transform(argv[i] + 12, &transform) > 0) {
 			continue;
+		} else if (strcmp(argv[i], "--rotating-transform") == 0) {
+			flags |= WINDOW_FLAG_ROTATING_TRANSFORM;
+			continue;
 		} else if (sscanf(argv[i], "--scale=%d", &scale) > 0) {
 			continue;
 		} else if (strcmp(argv[i], "--use-viewport") == 0) {
-			use_viewport = 1;
+			flags |= WINDOW_FLAG_USE_VIEWPORT;
 			continue;
 		} else {
 			printf("Invalid option: %s\n", argv[i]);
@@ -883,8 +902,7 @@ main(int argc, char **argv)
 
 	display = create_display(version);
 
-	window = create_window(display, width, height, transform, scale,
-			       use_viewport);
+	window = create_window(display, width, height, transform, scale, flags);
 	if (!window)
 		return 1;
 
