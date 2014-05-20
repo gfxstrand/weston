@@ -168,6 +168,23 @@ transform_apply_viewport(pixman_transform_t *transform,
 }
 
 static void
+weston_matrix_to_pixman_transform(pixman_transform_t *pt,
+				  const struct weston_matrix *wm)
+{
+	/* Pixman supports only 2D transform matrix, but Weston uses 3D, *
+	 * so we're omitting Z coordinate here. */
+	pt->matrix[0][0] = pixman_double_to_fixed(wm->d[0]);
+	pt->matrix[0][1] = pixman_double_to_fixed(wm->d[4]);
+	pt->matrix[0][2] = pixman_double_to_fixed(wm->d[12]);
+	pt->matrix[1][0] = pixman_double_to_fixed(wm->d[1]);
+	pt->matrix[1][1] = pixman_double_to_fixed(wm->d[5]);
+	pt->matrix[1][2] = pixman_double_to_fixed(wm->d[13]);
+	pt->matrix[2][0] = pixman_double_to_fixed(wm->d[3]);
+	pt->matrix[2][1] = pixman_double_to_fixed(wm->d[7]);
+	pt->matrix[2][2] = pixman_double_to_fixed(wm->d[15]);
+}
+
+static void
 repaint_region(struct weston_view *ev, struct weston_output *output,
 	       pixman_region32_t *region, pixman_region32_t *surf_region,
 	       pixman_op_t pixman_op)
@@ -179,7 +196,7 @@ repaint_region(struct weston_view *ev, struct weston_output *output,
 	struct weston_buffer_viewport *vp = &ev->surface->buffer_viewport;
 	pixman_region32_t final_region;
 	float view_x, view_y;
-	pixman_transform_t transform;
+	pixman_transform_t transform, surface_transform;
 	pixman_fixed_t fw, fh;
 	pixman_image_t *mask_image;
 	pixman_color_t mask = { 0, };
@@ -263,26 +280,9 @@ repaint_region(struct weston_view *ev, struct weston_output *output,
 				   pixman_double_to_fixed (output->y));
 
 	if (ev->transform.enabled) {
-		/* Pixman supports only 2D transform matrix, but Weston uses 3D,
-		 * so we're omitting Z coordinate here
-		 */
-		pixman_transform_t surface_transform = {{
-				{ D2F(ev->transform.matrix.d[0]),
-				  D2F(ev->transform.matrix.d[4]),
-				  D2F(ev->transform.matrix.d[12]),
-				},
-				{ D2F(ev->transform.matrix.d[1]),
-				  D2F(ev->transform.matrix.d[5]),
-				  D2F(ev->transform.matrix.d[13]),
-				},
-				{ D2F(ev->transform.matrix.d[3]),
-				  D2F(ev->transform.matrix.d[7]),
-				  D2F(ev->transform.matrix.d[15]),
-				}
-			}};
-
-		pixman_transform_invert(&surface_transform, &surface_transform);
-		pixman_transform_multiply (&transform, &surface_transform, &transform);
+		weston_matrix_to_pixman_transform(&surface_transform,
+						  &ev->transform.inverse);
+		pixman_transform_multiply(&transform, &surface_transform, &transform);
 	} else {
 		pixman_transform_translate(&transform, NULL,
 					   pixman_double_to_fixed ((double)-ev->geometry.x),
