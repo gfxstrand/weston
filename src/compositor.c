@@ -324,7 +324,7 @@ surface_handle_pending_buffer_destroy(struct wl_listener *listener, void *data)
 {
 	struct weston_surface *surface =
 		container_of(listener, struct weston_surface,
-			     pending.buffer_destroy_listener);
+			     pending_buffer_destroy_listener);
 
 	surface->pending.buffer = NULL;
 }
@@ -418,7 +418,7 @@ weston_surface_create(struct weston_compositor *compositor)
 
 	wl_list_init(&surface->frame_callback_list);
 
-	surface->pending.buffer_destroy_listener.notify =
+	surface->pending_buffer_destroy_listener.notify =
 		surface_handle_pending_buffer_destroy;
 	pixman_region32_init(&surface->pending.damage);
 	pixman_region32_init(&surface->pending.opaque);
@@ -1346,7 +1346,7 @@ static void
 weston_surface_reset_pending_buffer(struct weston_surface *surface)
 {
 	if (surface->pending.buffer)
-		wl_list_remove(&surface->pending.buffer_destroy_listener.link);
+		wl_list_remove(&surface->pending_buffer_destroy_listener.link);
 	surface->pending.buffer = NULL;
 	surface->pending.sx = 0;
 	surface->pending.sy = 0;
@@ -1409,7 +1409,7 @@ weston_surface_destroy(struct weston_surface *surface)
 	pixman_region32_fini(&surface->pending.damage);
 
 	if (surface->pending.buffer)
-		wl_list_remove(&surface->pending.buffer_destroy_listener.link);
+		wl_list_remove(&surface->pending_buffer_destroy_listener.link);
 
 	weston_buffer_reference(&surface->buffer_ref, NULL);
 
@@ -1934,7 +1934,7 @@ surface_attach(struct wl_client *client,
 	/* Attach, attach, without commit in between does not send
 	 * wl_buffer.release. */
 	if (surface->pending.buffer)
-		wl_list_remove(&surface->pending.buffer_destroy_listener.link);
+		wl_list_remove(&surface->pending_buffer_destroy_listener.link);
 
 	surface->pending.sx = sx;
 	surface->pending.sy = sy;
@@ -1942,7 +1942,7 @@ surface_attach(struct wl_client *client,
 	surface->pending.newly_attached = 1;
 	if (buffer) {
 		wl_signal_add(&buffer->destroy_signal,
-			      &surface->pending.buffer_destroy_listener);
+			      &surface->pending_buffer_destroy_listener);
 	}
 }
 
@@ -2277,8 +2277,9 @@ weston_subsurface_commit_from_cache(struct weston_subsurface *sub)
 
 	/* wl_surface.attach */
 	if (sub->cached.newly_attached)
-		weston_surface_attach(surface, sub->cached.buffer_ref.buffer);
-	weston_buffer_reference(&sub->cached.buffer_ref, NULL);
+		weston_surface_attach(surface, sub->cached.buffer);
+	sub->cached.buffer = NULL;
+	weston_buffer_reference(&sub->cached_buffer_ref, NULL);
 
 	if (surface->configure && sub->cached.newly_attached)
 		surface->configure(surface, sub->cached.sx, sub->cached.sy);
@@ -2327,7 +2328,7 @@ weston_subsurface_commit_from_cache(struct weston_subsurface *sub)
 
 	weston_surface_schedule_repaint(surface);
 
-	sub->cached.has_data = 0;
+	sub->has_cached_data = 0;
 }
 
 static void
@@ -2349,7 +2350,8 @@ weston_subsurface_commit_to_cache(struct weston_subsurface *sub)
 
 	if (surface->pending.newly_attached) {
 		sub->cached.newly_attached = 1;
-		weston_buffer_reference(&sub->cached.buffer_ref,
+		sub->cached.buffer = surface->pending.buffer;
+		weston_buffer_reference(&sub->cached_buffer_ref,
 					surface->pending.buffer);
 	}
 	sub->cached.sx += surface->pending.sx;
@@ -2367,7 +2369,7 @@ weston_subsurface_commit_to_cache(struct weston_subsurface *sub)
 			    &surface->pending.frame_callback_list);
 	wl_list_init(&surface->pending.frame_callback_list);
 
-	sub->cached.has_data = 1;
+	sub->has_cached_data = 1;
 }
 
 static int
@@ -2396,7 +2398,7 @@ weston_subsurface_commit(struct weston_subsurface *sub)
 	if (weston_subsurface_is_synchronized(sub)) {
 		weston_subsurface_commit_to_cache(sub);
 	} else {
-		if (sub->cached.has_data) {
+		if (sub->has_cached_data) {
 			/* flush accumulated state from cache */
 			weston_subsurface_commit_to_cache(sub);
 			weston_subsurface_commit_from_cache(sub);
@@ -2423,7 +2425,7 @@ weston_subsurface_synchronized_commit(struct weston_subsurface *sub)
 	 * all the way down.
 	 */
 
-	if (sub->cached.has_data)
+	if (sub->has_cached_data)
 		weston_subsurface_commit_from_cache(sub);
 
 	wl_list_for_each(tmp, &surface->subsurface_list, parent_link) {
@@ -2635,7 +2637,8 @@ weston_subsurface_cache_init(struct weston_subsurface *sub)
 	pixman_region32_init(&sub->cached.opaque);
 	pixman_region32_init(&sub->cached.input);
 	wl_list_init(&sub->cached.frame_callback_list);
-	sub->cached.buffer_ref.buffer = NULL;
+	sub->cached.buffer = NULL;
+	sub->cached_buffer_ref.buffer = NULL;
 }
 
 static void
@@ -2646,7 +2649,8 @@ weston_subsurface_cache_fini(struct weston_subsurface *sub)
 	wl_list_for_each_safe(cb, tmp, &sub->cached.frame_callback_list, link)
 		wl_resource_destroy(cb->resource);
 
-	weston_buffer_reference(&sub->cached.buffer_ref, NULL);
+	sub->cached.buffer = NULL;
+	weston_buffer_reference(&sub->cached_buffer_ref, NULL);
 	pixman_region32_fini(&sub->cached.damage);
 	pixman_region32_fini(&sub->cached.opaque);
 	pixman_region32_fini(&sub->cached.input);
